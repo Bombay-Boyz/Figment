@@ -46,6 +46,7 @@ library
     Figment.Check
     Figment.Extract
     Figment.Provider.Json
+    Figment.Provider.Env
     Figment
   build-depends:
       base        >= 4.17 && < 5
@@ -68,6 +69,7 @@ test-suite figment-test
     Figment.CompileFail
     Figment.ExtractTests
     Figment.JsonProvider
+    Figment.EnvProvider
   build-depends:
       base
     , figment
