@@ -63,7 +63,7 @@ test-suite figment-test
     , containers
     , scientific
     , text
-    , QuickCheck  >= 2.14.3 && < 2.16
+    , QuickCheck  >= 2.14.3 && < 2.20
     , tasty       >= 1.4   && < 1.6
     , tasty-quickcheck
   ghc-options:        -threaded -rtsopts -with-rtsopts=-N

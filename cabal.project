@@ -1,5 +1,8 @@
 packages: .
 
 -- §2.12: deterministic, reproducible builds.
--- Pinned via cabal.project.freeze after first successful solve.
--- Run `cabal freeze` after Phase 1 compiles, then commit the freeze file.
+index-state: 2025-10-01T00:00:00Z
+
+-- Enable test-suite and benchmark components for all local packages.
+tests: True
+benchmarks: True
