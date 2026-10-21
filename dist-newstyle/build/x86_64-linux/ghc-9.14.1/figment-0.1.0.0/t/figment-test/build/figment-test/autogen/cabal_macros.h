@@ -50,6 +50,16 @@
   (major1) == 0 && (major2) <  1 || \
   (major1) == 0 && (major2) == 1 && (minor) <= 0)
 #endif /* MIN_VERSION_figment */
+/* package process-1.6.26.1 */
+#ifndef VERSION_process
+#define VERSION_process "1.6.26.1"
+#endif /* VERSION_process */
+#ifndef MIN_VERSION_process
+#define MIN_VERSION_process(major1,major2,minor) (\
+  (major1) <  1 || \
+  (major1) == 1 && (major2) <  6 || \
+  (major1) == 1 && (major2) == 6 && (minor) <= 26)
+#endif /* MIN_VERSION_process */
 /* package scientific-0.3.9.0 */
 #ifndef VERSION_scientific
 #define VERSION_scientific "0.3.9.0"
@@ -70,6 +80,16 @@
   (major1) == 1 && (major2) <  5 || \
   (major1) == 1 && (major2) == 5 && (minor) <= 5)
 #endif /* MIN_VERSION_tasty */
+/* package tasty-hunit-0.10.2 */
+#ifndef VERSION_tasty_hunit
+#define VERSION_tasty_hunit "0.10.2"
+#endif /* VERSION_tasty_hunit */
+#ifndef MIN_VERSION_tasty_hunit
+#define MIN_VERSION_tasty_hunit(major1,major2,minor) (\
+  (major1) <  0 || \
+  (major1) == 0 && (major2) <  10 || \
+  (major1) == 0 && (major2) == 10 && (minor) <= 2)
+#endif /* MIN_VERSION_tasty_hunit */
 /* package tasty-quickcheck-0.11.1 */
 #ifndef VERSION_tasty_quickcheck
 #define VERSION_tasty_quickcheck "0.11.1"

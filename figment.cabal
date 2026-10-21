@@ -42,6 +42,8 @@ library
     Figment.Merge
     Figment.Layer
     Figment.Error
+    Figment.Provider
+    Figment.Check
   build-depends:
       base        >= 4.17 && < 5
     , containers  >= 0.6.7 && < 0.8
@@ -57,6 +59,7 @@ test-suite figment-test
   other-modules:
     Figment.Properties
     Figment.Arbitrary
+    Figment.CompileFail
   build-depends:
       base
     , figment
@@ -66,6 +69,9 @@ test-suite figment-test
     , QuickCheck  >= 2.14.3 && < 2.20
     , tasty       >= 1.4   && < 1.6
     , tasty-quickcheck
+    , tasty-hunit
+    , process
+  build-tool-depends: cabal-install:cabal
   ghc-options:        -threaded -rtsopts -with-rtsopts=-N
 
 benchmark figment-bench
