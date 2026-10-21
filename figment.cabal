@@ -80,6 +80,7 @@ test-suite figment-test
     Figment.CliProvider
     Figment.Precision
     Figment.Compose
+    Figment.RequiredFields
     Figment.ProvTests
   build-depends:
       base

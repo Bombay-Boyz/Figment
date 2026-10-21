@@ -3,6 +3,7 @@ module Main (main) where
 import Test.Tasty
 
 import qualified Figment.CompileFail as CF
+import qualified Figment.RequiredFields as RF
 import qualified Figment.Compose as CO
 import qualified Figment.ExtractTests as E
 import qualified Figment.CliProvider as CL
@@ -22,5 +23,6 @@ main = defaultMain $ testGroup "figment"
   , EP.tests
   , CL.tests
   , CO.tests
+  , RF.tests
   , CF.tests
   ]
