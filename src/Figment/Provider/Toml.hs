@@ -5,9 +5,11 @@ module Figment.Provider.Toml
   ( TomlFile(..)
   ) where
 
+import Control.Exception (SomeException, try)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
-import qualified Data.Text.IO as TIO
+import qualified Data.Text.Encoding as TE
+import qualified Data.ByteString as BS
 import qualified Toml
 import Toml (Value'(..), Table'(..))
 
@@ -20,11 +22,16 @@ newtype TomlFile = TomlFile FilePath
 
 instance Provider TomlFile where
   tagProvider d (TomlFile path) = do
-    text <- TIO.readFile path
-    pure $ case Toml.parse text of
-      Left err  -> Left (SourceError path (Text.pack err))
-      Right ast -> mkTagged d (SourceId (Text.pack ("toml:" ++ path)), DefaultProfile)
-                              (fromTomlTable ast)
+    outcome <- try $ do
+      bytes <- BS.readFile path
+      let text = TE.decodeUtf8With (\_ _ -> Just '\xfffd') bytes
+      pure (Toml.parse text)
+    pure $ case outcome :: Either SomeException (Either String (Table' Toml.Position)) of
+      Left e            -> Left (SourceError path (Text.pack (show e)))
+      Right (Left err)  -> Left (SourceError path (Text.pack err))
+      Right (Right ast) ->
+        mkTagged d (SourceId (Text.pack ("toml:" ++ path)), DefaultProfile)
+                  (fromTomlTable ast)
 
 fromTomlTable :: Table' a -> RawJSON
 fromTomlTable (MkTable t) =
