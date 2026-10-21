@@ -47,6 +47,9 @@ library
     Figment.Extract
     Figment.Provider.Json
     Figment.Provider.Env
+    Figment.Provider.Cli
+    Figment.Provider.Defaults
+    Figment.Provider.Toml
     Figment
   build-depends:
       base        >= 4.17 && < 5
@@ -57,6 +60,7 @@ library
     , vector      >= 0.13  && < 0.14
     , scientific  >= 0.3.7 && < 0.4
     , text        >= 2.0.2 && < 2.2
+    , toml-parser >= 2.0   && < 2.1
 
 test-suite figment-test
   import:             warnings
@@ -70,6 +74,7 @@ test-suite figment-test
     Figment.ExtractTests
     Figment.JsonProvider
     Figment.EnvProvider
+    Figment.CliProvider
   build-depends:
       base
     , figment

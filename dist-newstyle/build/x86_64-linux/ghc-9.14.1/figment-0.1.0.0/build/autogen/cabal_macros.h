@@ -80,6 +80,16 @@
   (major1) == 2 && (major2) <  1 || \
   (major1) == 2 && (major2) == 1 && (minor) <= 4)
 #endif /* MIN_VERSION_text */
+/* package toml-parser-2.0.2.0 */
+#ifndef VERSION_toml_parser
+#define VERSION_toml_parser "2.0.2.0"
+#endif /* VERSION_toml_parser */
+#ifndef MIN_VERSION_toml_parser
+#define MIN_VERSION_toml_parser(major1,major2,minor) (\
+  (major1) <  2 || \
+  (major1) == 2 && (major2) <  0 || \
+  (major1) == 2 && (major2) == 0 && (minor) <= 2)
+#endif /* MIN_VERSION_toml_parser */
 /* package vector-0.13.2.0 */
 #ifndef VERSION_vector
 #define VERSION_vector "0.13.2.0"
