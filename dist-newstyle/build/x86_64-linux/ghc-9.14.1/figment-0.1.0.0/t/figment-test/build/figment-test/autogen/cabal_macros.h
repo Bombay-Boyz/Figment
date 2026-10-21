@@ -90,6 +90,16 @@
   (major1) == 1 && (major2) <  5 || \
   (major1) == 1 && (major2) == 5 && (minor) <= 4)
 #endif /* MIN_VERSION_filepath */
+/* package hedgehog-1.7 */
+#ifndef VERSION_hedgehog
+#define VERSION_hedgehog "1.7"
+#endif /* VERSION_hedgehog */
+#ifndef MIN_VERSION_hedgehog
+#define MIN_VERSION_hedgehog(major1,major2,minor) (\
+  (major1) <  1 || \
+  (major1) == 1 && (major2) <  7 || \
+  (major1) == 1 && (major2) == 7 && (minor) <= 0)
+#endif /* MIN_VERSION_hedgehog */
 /* package process-1.6.26.1 */
 #ifndef VERSION_process
 #define VERSION_process "1.6.26.1"
@@ -120,6 +130,36 @@
   (major1) == 1 && (major2) <  5 || \
   (major1) == 1 && (major2) == 5 && (minor) <= 5)
 #endif /* MIN_VERSION_tasty */
+/* package tasty-bench-0.5.1 */
+#ifndef VERSION_tasty_bench
+#define VERSION_tasty_bench "0.5.1"
+#endif /* VERSION_tasty_bench */
+#ifndef MIN_VERSION_tasty_bench
+#define MIN_VERSION_tasty_bench(major1,major2,minor) (\
+  (major1) <  0 || \
+  (major1) == 0 && (major2) <  5 || \
+  (major1) == 0 && (major2) == 5 && (minor) <= 1)
+#endif /* MIN_VERSION_tasty_bench */
+/* package tasty-golden-2.3.6 */
+#ifndef VERSION_tasty_golden
+#define VERSION_tasty_golden "2.3.6"
+#endif /* VERSION_tasty_golden */
+#ifndef MIN_VERSION_tasty_golden
+#define MIN_VERSION_tasty_golden(major1,major2,minor) (\
+  (major1) <  2 || \
+  (major1) == 2 && (major2) <  3 || \
+  (major1) == 2 && (major2) == 3 && (minor) <= 6)
+#endif /* MIN_VERSION_tasty_golden */
+/* package tasty-hedgehog-1.4.0.2 */
+#ifndef VERSION_tasty_hedgehog
+#define VERSION_tasty_hedgehog "1.4.0.2"
+#endif /* VERSION_tasty_hedgehog */
+#ifndef MIN_VERSION_tasty_hedgehog
+#define MIN_VERSION_tasty_hedgehog(major1,major2,minor) (\
+  (major1) <  1 || \
+  (major1) == 1 && (major2) <  4 || \
+  (major1) == 1 && (major2) == 4 && (minor) <= 0)
+#endif /* MIN_VERSION_tasty_hedgehog */
 /* package tasty-hunit-0.10.2 */
 #ifndef VERSION_tasty_hunit
 #define VERSION_tasty_hunit "0.10.2"

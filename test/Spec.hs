@@ -2,6 +2,10 @@ module Main (main) where
 
 import Test.Tasty
 
+import qualified Figment.Adversarial as ADV
+import qualified Figment.GoldenErrors as GE
+import qualified Figment.Stress as ST
+import qualified Figment.Model as MDL
 import qualified Figment.CompileFail as CF
 import qualified Figment.RequiredFields as RF
 import qualified Figment.FileProviders as FP
@@ -26,5 +30,9 @@ main = defaultMain $ testGroup "figment"
   , CO.tests
   , RF.tests
   , FP.tests
+  , ADV.tests
+  , GE.tests
+  , ST.tests
+  , MDL.tests
   , CF.tests
   ]
