@@ -1,0 +1,61 @@
+# ==========================================
+# GHC / Haskell Compilation Artifacts
+# ==========================================
+*.o
+*.hi
+*.dyn_o
+*.dyn_hi
+*.chi
+*.chs.h
+*.hc
+
+# ==========================================
+# Cabal Build Artifacts
+# ==========================================
+dist/
+dist-newstyle/
+*.cabal.sandbox.config
+.cabal-sandbox/
+cabal.project.local
+cabal.project.local~
+cabal.project.freeze
+
+# ==========================================
+# Stack Build Artifacts
+# ==========================================
+.stack-work/
+stack.yaml.lock
+
+# ==========================================
+# Tooling, IDEs, and Language Server (HLS)
+# ==========================================
+.hie/
+.hpc/
+.ghc.environment.*
+tags
+TAGS
+
+# ==========================================
+# Profiling and Benchmarks
+# ==========================================
+*.prof
+*.hp
+*.eventlog
+*.aux
+*.hp-build
+
+# ==========================================
+# Environment & Editors
+# ==========================================
+.direnv/
+.env
+.envrc
+
+# OS & Editor temp files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+.idea/
+.vscode/
