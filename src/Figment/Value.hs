@@ -42,7 +42,7 @@ data RawJSON
   | RawStr  Text
   | RawObj  [(Text, RawJSON)]
   | RawArr  [RawJSON]
-  deriving (Show)
+  deriving (Eq, Show)
 
 data Value
   = VNull
