@@ -1,46 +1,61 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | Criterion benchmarks for the two functions on the per-config-load
--- path (feasibility study §10, Standard §5.6). Phase 1 benchmarks only;
--- regression thresholds get wired into CI once we have a baseline from
--- a first successful run.
+-- path (feasibility study §10, Standard §5.6).
 module Figment.Bench (benchmarks) where
 
 import Criterion.Main
-import Data.Text (Text)
 import qualified Data.Text as Text
 
-import Figment.Value
+import Figment.Error (ConfigError)
+import Figment.Layer (Layer(..), runLayers)
 import Figment.Merge
+import Figment.Value
 
--- | A realistically large synthetic config: ~1000 top-level keys, each
--- with a 10-element array and a leaf — the "large-input case" of
--- Standard §4.10.
+smallRawJSON :: RawJSON
+smallRawJSON = RawObj [("host", RawStr "localhost"), ("port", RawNum 8080)]
+
+mediumRawJSON :: RawJSON
+mediumRawJSON = RawObj
+  [ (key i, RawStr "value") | i <- [0..99 :: Int] ]
+  where key i = Text.pack ("k" ++ show i)
+
 largeRawJSON :: RawJSON
 largeRawJSON = RawObj
   [ (key i, RawObj
       [ ("nested", RawArr [RawNum (fromIntegral j) | j <- [0..9 :: Int]])
       , ("leaf",   RawStr "value")
       ])
-  | i <- [0..999]
+  | i <- [0..999 :: Int]
   ]
-  where
-    key :: Int -> Text
-    key i = Text.pack ("k" ++ show i)
+  where key i = Text.pack ("k" ++ show i)
+
+tag :: RawJSON -> Either ConfigError Tagged
+tag = mkTagged defaultDepth (SourceId "bench", DefaultProfile)
 
 benchmarks :: [Benchmark]
 benchmarks =
-  case (mkTagged defaultDepth (SourceId "bench", DefaultProfile) largeRawJSON,
-        mkTagged defaultDepth (SourceId "bench", DefaultProfile) largeRawJSON) of
-    (Right a, Right b) -> [ bgroup "mkTagged"
-                              [ bench "large (1000 keys × 10-item arrays)" $
-                                  nf (mkTagged defaultDepth (SourceId "bench", DefaultProfile))
-                                     largeRawJSON
-                              ]
-                          , bgroup "mergeAlg"
-                              [ bench "1000-key obj × 1000-key obj" $
-                                  nf (uncurry (mergeAlg RightWins Replace)) (a, b)
-                              ]
-                          ]
-    _ -> [ bgroup "mkTagged" []
-         , bgroup "mergeAlg" []
-         ]
+  [ bgroup "mkTagged"
+      [ bench "small"  $ nf tag smallRawJSON
+      , bench "medium" $ nf tag mediumRawJSON
+      , bench "large"  $ nf tag largeRawJSON
+      ]
+  , bgroup "mergeAlg"
+      [ case (tag mediumRawJSON, tag mediumRawJSON) of
+          (Right a, Right b) ->
+            bench "100-key obj × 100-key obj" $
+              nf (uncurry (mergeAlg RightWins Replace)) (a, b)
+          _ -> bench "skipped" (nf id ())
+      , case (tag largeRawJSON, tag largeRawJSON) of
+          (Right a, Right b) ->
+            bench "1000-key obj × 1000-key obj" $
+              nf (uncurry (mergeAlg RightWins Replace)) (a, b)
+          _ -> bench "skipped" (nf id ())
+      ]
+  , bgroup "runLayers"
+      [ case (tag mediumRawJSON, tag mediumRawJSON, tag mediumRawJSON) of
+          (Right a, Right b, Right c) ->
+            bench "3-layer chain (medium)" $
+              nf runLayers [Merge a, Join b, Admerge c]
+          _ -> bench "skipped" (nf id ())
+      ]
+  ]
