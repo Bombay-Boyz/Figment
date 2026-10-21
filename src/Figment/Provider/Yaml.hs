@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 -- | YAML file provider (§8.2 of the feasibility study). Parses via
 -- 'yaml' (HsYAML-compatible) and flattens through 'fromAeson'.

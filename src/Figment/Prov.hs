@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 -- | Provenance-preserving extraction (ADR 012). Collects every leaf's
 -- 'Metadata' into a 'ProvMap' keyed by its 'Path', alongside the
 -- decoded record from 'runExtract'.

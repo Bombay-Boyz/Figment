@@ -4,6 +4,7 @@ import Test.Tasty
 
 import qualified Figment.Adversarial as ADV
 import qualified Figment.GoldenErrors as GE
+import qualified Figment.SafeBoundaryTest as SB
 import qualified Figment.Stress as ST
 import qualified Figment.Model as MDL
 import qualified Figment.CompileFail as CF
@@ -32,6 +33,7 @@ main = defaultMain $ testGroup "figment"
   , FP.tests
   , ADV.tests
   , GE.tests
+  , SB.tests
   , ST.tests
   , MDL.tests
   , CF.tests

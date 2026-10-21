@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 -- | Primitive newtypes and the 'Depth' bound type — the only things
 -- 'Figment.Error' and 'Figment.Value' must both see. Sits below both so
 -- neither imports the other (Standard §2.6: dependency direction points

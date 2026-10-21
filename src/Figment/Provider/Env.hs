@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 -- | Environment-variable provider (§8.2 of the feasibility study).
 -- The 'Provider' instance for 'EnvPrefixed' lives here rather than in

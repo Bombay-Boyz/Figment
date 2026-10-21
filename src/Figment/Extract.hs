@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 -- | @runExtract@ — decode a merged 'Tagged' tree into the caller's
 -- record type via aeson's 'FromJSON' (feasibility study §8.2,
 -- ADR 006).

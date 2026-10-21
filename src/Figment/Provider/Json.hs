@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 -- | JSON file provider (§8.5 of the feasibility study). The
 -- aeson-to-RawJSON boundary is defined once, here.
 module Figment.Provider.Json

@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 -- | The merge operator '⊕' (§2, §5 of the feasibility study).
 --
 -- There is deliberately /no/ 'Semigroup' or 'Monoid' instance on

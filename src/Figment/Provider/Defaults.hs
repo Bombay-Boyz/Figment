@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 -- | Default-values provider (§8.2 of the feasibility study). Renders a
 -- caller-supplied default record into a 'RawJSON' tree via aeson's

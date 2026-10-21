@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 module Figment.Provider
   ( Provider(..)
   , tagProviderDefault

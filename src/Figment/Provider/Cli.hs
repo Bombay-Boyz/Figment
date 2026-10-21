@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 -- | CLI-argument provider (§8.2 of the feasibility study). Arguments of
 -- the form @--key=value@ or @--key value@ become leaves; keys are

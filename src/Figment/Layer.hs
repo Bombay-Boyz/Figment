@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 {-# LANGUAGE CPP #-}
 -- | Cross-strategy composition (§7 of the feasibility study).
 --

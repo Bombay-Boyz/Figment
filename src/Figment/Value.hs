@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 module Figment.Value
   ( Key(..)
   , SourceId(..)

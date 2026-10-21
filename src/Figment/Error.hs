@@ -1,3 +1,4 @@
+{-# LANGUAGE Safe #-}
 module Figment.Error (ConfigError(..)) where
 
 import Control.DeepSeq (NFData(rnf))

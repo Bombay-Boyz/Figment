@@ -1,3 +1,4 @@
+{-# LANGUAGE Trustworthy #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 -- | TOML file provider (§8.2 of the feasibility study).
 module Figment.Provider.Toml
