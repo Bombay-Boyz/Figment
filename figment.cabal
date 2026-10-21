@@ -78,6 +78,7 @@ test-suite figment-test
     Figment.EnvProvider
     Figment.CliProvider
     Figment.Precision
+    Figment.Compose
   build-depends:
       base
     , figment

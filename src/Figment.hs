@@ -24,6 +24,9 @@ module Figment
   , CliArgs(..)
   , Defaults(..)
   , FieldProvider(..)
+  , JsonFile(..)
+  , TomlFile(..)
+  , YamlFile(..)
   , composeChecked
   , composeUnchecked
   ) where
@@ -36,6 +39,9 @@ import Figment.Layer (Layer(..), runLayers)
 import Figment.Provider
   ( Provider(..), tagProviderDefault
   , EnvPrefixed(..), CliArgs(..), Defaults(..), FieldProvider(..) )
+import Figment.Provider.Json (JsonFile(..))
+import Figment.Provider.Toml (TomlFile(..))
+import Figment.Provider.Yaml (YamlFile(..))
 import Figment.Value
   ( Key(..), SourceId(..), Path(..), Profile(..), ProfileName(..)
   , Depth, mkDepth, defaultDepth, Tagged(..), Value(..), Metadata(..) )
