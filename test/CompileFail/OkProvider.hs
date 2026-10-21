@@ -4,15 +4,15 @@
 {-# LANGUAGE TypeApplications #-}
 module OkProvider where
 
-import Figment.Check (RequireGenericProvider)
-import Figment.Provider (EnvPrefixed)
+import Data.Aeson (FromJSON)
+import GHC.Generics (Generic)
+import Figment (composeChecked, Layer, EnvPrefixed)
 
 data AppConfig = AppConfig
+  deriving (Generic)
+instance FromJSON AppConfig
 
-checkIt :: RequireGenericProvider r ps => ()
-checkIt = ()
-
-_ = checkIt @AppConfig @'[EnvPrefixed]
+_ = composeChecked @AppConfig @'[EnvPrefixed] ([] :: [Layer])
 
 main :: IO ()
 main = pure ()

@@ -44,10 +44,14 @@ library
     Figment.Error
     Figment.Provider
     Figment.Check
+    Figment.Extract
+    Figment
   build-depends:
       base        >= 4.17 && < 5
     , containers  >= 0.6.7 && < 0.8
     , deepseq     >= 1.4.8 && < 1.6
+    , aeson       >= 2.1   && < 2.4
+    , vector      >= 0.13  && < 0.14
     , scientific  >= 0.3.7 && < 0.4
     , text        >= 2.0.2 && < 2.2
 
@@ -60,6 +64,7 @@ test-suite figment-test
     Figment.Properties
     Figment.Arbitrary
     Figment.CompileFail
+    Figment.ExtractTests
   build-depends:
       base
     , figment
@@ -71,6 +76,7 @@ test-suite figment-test
     , tasty-quickcheck
     , tasty-hunit
     , process
+    , aeson
   build-tool-depends: cabal-install:cabal
   ghc-options:        -threaded -rtsopts -with-rtsopts=-N
 

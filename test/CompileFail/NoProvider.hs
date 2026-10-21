@@ -2,13 +2,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TypeApplications #-}
-module Main where
+module NoProvider where
 
-import Figment.Check (RequireGenericProvider)
+import Figment (composeChecked, Layer)
 
 data AppConfig = AppConfig
 
-checkIt :: RequireGenericProvider r ps => ()
-checkIt = ()
+_ = composeChecked @AppConfig @'[] ([] :: [Layer])
 
-_ = checkIt @AppConfig @'[]
+main :: IO ()
+main = pure ()

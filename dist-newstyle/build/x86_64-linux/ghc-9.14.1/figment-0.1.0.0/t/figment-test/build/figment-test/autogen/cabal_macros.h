@@ -20,6 +20,16 @@
   (major1) == 2 && (major2) <  19 || \
   (major1) == 2 && (major2) == 19 && (minor) <= 0)
 #endif /* MIN_VERSION_QuickCheck */
+/* package aeson-2.3.2.0 */
+#ifndef VERSION_aeson
+#define VERSION_aeson "2.3.2.0"
+#endif /* VERSION_aeson */
+#ifndef MIN_VERSION_aeson
+#define MIN_VERSION_aeson(major1,major2,minor) (\
+  (major1) <  2 || \
+  (major1) == 2 && (major2) <  3 || \
+  (major1) == 2 && (major2) == 3 && (minor) <= 2)
+#endif /* MIN_VERSION_aeson */
 /* package base-4.22.0.0 */
 #ifndef VERSION_base
 #define VERSION_base "4.22.0.0"
