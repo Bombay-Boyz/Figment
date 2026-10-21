@@ -45,6 +45,7 @@ library
     Figment.Provider
     Figment.Check
     Figment.Extract
+    Figment.Prov
     Figment.Provider.Json
     Figment.Provider.Env
     Figment.Provider.Cli
@@ -79,6 +80,7 @@ test-suite figment-test
     Figment.CliProvider
     Figment.Precision
     Figment.Compose
+    Figment.ProvTests
   build-depends:
       base
     , figment

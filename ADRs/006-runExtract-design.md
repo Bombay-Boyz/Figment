@@ -1,6 +1,6 @@
 # ADR 006 — runExtract design: two-pass decode with provenance reattachment
 
-Status: Proposed | Date: 2026-10-21 | Rule: §2.1, §2.8, §11
+Status: Superseded by ADR 012 | Date: 2026-10-21 | Rule: §2.1, §2.8, §11
 
 ## Context
 `runExtract :: FromJSON a => Tagged -> Either ConfigError a` is the

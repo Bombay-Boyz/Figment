@@ -28,7 +28,7 @@ newtype Key      = Key      Text deriving (Eq, Ord, Show, Generic)
 instance NFData Key where rnf (Key t) = rnf t
 newtype SourceId = SourceId Text deriving (Eq, Ord, Show, Generic)
 instance NFData SourceId where rnf (SourceId t) = rnf t
-newtype Path     = Path     [Key] deriving (Eq, Show, Generic)
+newtype Path     = Path     [Key] deriving (Eq, Ord, Show, Generic)
 instance NFData Path where rnf (Path ks) = rnf ks
 
 data Profile = DefaultProfile | NamedProfile ProfileName

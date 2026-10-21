@@ -9,6 +9,7 @@ import qualified Figment.CliProvider as CL
 import qualified Figment.EnvProvider as EP
 import qualified Figment.JsonProvider as J
 import qualified Figment.Precision as PR
+import qualified Figment.ProvTests as PV
 import qualified Figment.Properties as P
 
 main :: IO ()
@@ -17,6 +18,7 @@ main = defaultMain $ testGroup "figment"
   , E.tests
   , J.tests
   , PR.tests
+  , PV.tests
   , EP.tests
   , CL.tests
   , CO.tests
