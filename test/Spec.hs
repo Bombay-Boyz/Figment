@@ -4,6 +4,7 @@ import Test.Tasty
 
 import qualified Figment.CompileFail as CF
 import qualified Figment.RequiredFields as RF
+import qualified Figment.FileProviders as FP
 import qualified Figment.Compose as CO
 import qualified Figment.ExtractTests as E
 import qualified Figment.CliProvider as CL
@@ -24,5 +25,6 @@ main = defaultMain $ testGroup "figment"
   , CL.tests
   , CO.tests
   , RF.tests
+  , FP.tests
   , CF.tests
   ]

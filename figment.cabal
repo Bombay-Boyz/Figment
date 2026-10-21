@@ -81,6 +81,7 @@ test-suite figment-test
     Figment.Precision
     Figment.Compose
     Figment.RequiredFields
+    Figment.FileProviders
     Figment.ProvTests
   build-depends:
       base
@@ -93,6 +94,9 @@ test-suite figment-test
     , tasty-quickcheck
     , tasty-hunit
     , process
+    , temporary
+    , directory
+    , filepath
     , aeson
     , bytestring
   build-tool-depends: cabal-install:cabal
