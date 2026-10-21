@@ -1,0 +1,85 @@
+cabal-version:      2.4
+name:               figment
+version:            0.1.0.0
+synopsis:           Layered configuration merging with per-node provenance
+description:
+  Core merge algebra, depth-bounded tagging, and closed error vocabulary
+  for the Figment configuration library. See ENGINEERING_STANDARD.md and
+  the feasibility study for the governing design.
+license:            BSD-3-Clause
+author:             (TBD)
+maintainer:         (TBD)
+category:           Configuration
+build-type:         Simple
+tested-with:        GHC == 9.4.7 || == 9.6.7 || == 9.8.4 || == 9.10.2 || == 9.12.1
+extra-doc-files:    ENGINEERING_STANDARD.md
+                    ADRs/001-defaultDepth-64.md
+
+common warnings
+  -- §5.1: mandatory compiler flags. Applied to every component, not
+  -- opt-in per module (§6 setup checklist).
+  ghc-options:
+    -Wall -Wcompat -Werror
+    -Wincomplete-uni-patterns -Wincomplete-record-updates
+    -Wmissing-export-lists -Wunused-imports -Wunused-top-binds
+    -Wunused-local-binds -Wunused-matches
+    -Wredundant-constraints -Wpartial-fields -Widentities
+  default-language: Haskell2010
+  default-extensions:
+    OverloadedStrings
+    ScopedTypeVariables
+    DeriveGeneric
+    DeriveAnyClass
+    LambdaCase
+    CPP
+
+library
+  import:             warnings
+  hs-source-dirs:     src
+  exposed-modules:
+    Figment.Prim
+    Figment.Value
+    Figment.Merge
+    Figment.Layer
+    Figment.Error
+  build-depends:
+      base        >= 4.17 && < 5
+    , containers  >= 0.6.7 && < 0.8
+    , deepseq     >= 1.4.8 && < 1.6
+    , scientific  >= 0.3.7 && < 0.4
+    , text        >= 2.0.2 && < 2.2
+
+test-suite figment-test
+  import:             warnings
+  type:               exitcode-stdio-1.0
+  hs-source-dirs:     test
+  main-is:            Spec.hs
+  other-modules:
+    Figment.Properties
+    Figment.Arbitrary
+  build-depends:
+      base
+    , figment
+    , containers
+    , scientific
+    , text
+    , QuickCheck  >= 2.14.3 && < 2.16
+    , tasty       >= 1.4   && < 1.6
+    , tasty-quickcheck
+  ghc-options:        -threaded -rtsopts -with-rtsopts=-N
+
+benchmark figment-bench
+  import:             warnings
+  type:               exitcode-stdio-1.0
+  hs-source-dirs:     bench
+  main-is:            Bench.hs
+  other-modules:
+    Figment.Bench
+  build-depends:
+      base
+    , figment
+    , containers
+    , scientific
+    , text
+    , criterion  >= 1.6 && < 1.8
+  ghc-options:        -O2 -threaded -rtsopts -with-rtsopts=-N

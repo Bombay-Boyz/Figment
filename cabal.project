@@ -1,0 +1,5 @@
+packages: .
+
+-- §2.12: deterministic, reproducible builds.
+-- Pinned via cabal.project.freeze after first successful solve.
+-- Run `cabal freeze` after Phase 1 compiles, then commit the freeze file.
