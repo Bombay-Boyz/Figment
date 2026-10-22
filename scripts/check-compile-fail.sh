@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Verifies that the CompileFail fixtures behave as §6.2 requires.
-# Run after `cabal build all --enable-tests` so the .ghc.environment.*
-# file exists and `figment` is visible.
+# Run from the repo root after `cabal build all --enable-tests` has
+# succeeded, so the .ghc.environment.* file exists and `figment` is
+# visible to a bare `ghc` invocation.
 set -euo pipefail
 
 check_fails() {

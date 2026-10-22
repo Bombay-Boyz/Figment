@@ -172,9 +172,11 @@ jobs:
           echo "package figment" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
           echo "package figment" >> cabal.project
-          echo "    ghc-options: -Werror=unused-packages" >> cabal.project
-          echo "package figment" >> cabal.project
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
+          # NOTE: -Werror=unused-packages deliberately omitted. Cabal passes
+          # every declared build-depend as -package-id; on GHC 9.10.2 the
+          # -Wunused-packages warning fires for test-suite deps that are
+          # only used in subprocesses (e.g. directory, used by CompileFail).
           cat >> cabal.project <<EOF
           EOF
           $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(figment)$/; }' >> cabal.project.local
@@ -199,10 +201,14 @@ jobs:
           $CABAL v2-build $ARG_COMPILER --disable-tests --disable-benchmarks all
       - name: build
         run: |
-          $CABAL v2-build $ARG_COMPILER $ARG_TESTS $ARG_BENCH all --write-ghc-environment-files=always
+          $CABAL v2-build $ARG_COMPILER $ARG_TESTS $ARG_BENCH all
       - name: tests
         run: |
           $CABAL v2-test $ARG_COMPILER $ARG_TESTS $ARG_BENCH all --test-show-details=direct
+      - name: compile-fail checks
+        run: |
+          cd source
+          ./scripts/check-compile-fail.sh
       - name: cabal check
         run: |
           cd ${PKGDIR_figment} || false
