@@ -102,10 +102,8 @@ test-suite figment-test
     , hedgehog
     , tasty-hunit
     , tasty-golden
-    , process
     , temporary
     , filepath
-    , directory
     , aeson
     , bytestring
   build-tool-depends: cabal-install:cabal
