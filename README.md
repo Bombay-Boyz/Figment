@@ -1,97 +1,144 @@
-# Figment for Haskell
+Layered configuration merging for Haskell, with per-node provenance and
+a compile-time check that a provider chain can actually supply values.
 
-A type-safe, depth-bounded configuration merging library for Haskell featuring provenance tracking and compile-time provider verification. Inspired by Rust's `figment` crate.
+`figment` reads configuration from JSON, TOML, YAML, environment
+variables, CLI arguments, or caller-supplied defaults, merges them under
+a chosen strategy, and decodes the result into a record. Every node in
+the merged tree carries its source, so you can always answer *"which
+layer set this value?"*
 
----
+## At a glance
 
-## Overview
+```haskell
+{-# LANGUAGE DataKinds, OverloadedStrings, TypeApplications #-}
 
-**Figment** enables application developers to merge settings from multiple layered sources—such as default code values, TOML, JSON, YAML, Dhall files, environment variables, and command-line arguments—into a single, validated Haskell record. 
-
-Every step in Figment's pipeline is backed by explicit algebraic rules:
-* **Provenance guarantees**: Every leaf node in a parsed configuration tree tracks its original source, active profile, and exact root-to-leaf key path.
-* **Bounded execution**: Hostile or deeply nested input formats fail gracefully via explicit stack budgets rather than crashing your runtime with a stack overflow.
-* **Compile-time verification**: Type families prevent incomplete provider pipelines at compile time before your program ever runs.
-
----
-
-## Features
-
-* **Provenance Tracking**: Every configuration value carries metadata detailing its original source ID, profile name, and exact structural key path.
-* **Stack & Resource Safety**: Every provider enforces a caller-controllable recursion budget (`Depth`, defaulting to 64) to neutralize stack-exhaustion attacks on untrusted inputs.
-* **Cross-Strategy Layer Merging**: Explicit control over left- vs. right-bias and array replacement vs. concatenation across layered configuration inputs.
-* **Compile-Time Reachability**: Catches missing provider errors at compile time using type-level verification (`composeChecked`).
-* **Closed Error Vocabulary**: Captures failure modes across all ingestion stages inside a single, structured `ConfigError` type.
-
----
-
-## Architecture
-
-Figment follows a hexagonal architecture separating core AST, merge algebra, type-level checks, and adapter providers:
-
-```text
-figment/
-  src/
-    Figment/
-      Value.hs         -- Value & Tagged domain models; provenance tracking
-      Merge.hs         -- Core merge operators (Bias, ArrayPolicy, mergeAlg)
-      Layer.hs         -- Ordered layer composition and execution (runLayers)
-      Error.hs         -- Stage-specific closed ConfigError type
-      Check.hs         -- Type families for compile-time provider reachability
-      Provider.hs      -- Core Provider class & built-in generic providers
-      Provider/        -- Standard format adapters (Env, Cli, Toml, Json, Yaml, Dhall)
-      Figment.hs       -- Public API façade
-      
-Merge AlgebraFigment combines configuration trees using four explicit strategies defined by Bias (LeftWins vs. RightWins) and Array Policy (Replace vs. Concat):   StrategyBiasArray PolicyBehaviormergeRightWinsReplaceRight operand overwrites left; arrays are replaced.   joinLeftWinsReplaceLeft operand takes precedence; arrays are replaced.   admergeRightWinsConcatRight operand overwrites left; array elements are appended[cite: 1].adjoinLeftWinsConcatLeft operand takes precedence; array elements are appended[cite: 1].Because mixed-strategy merge chains are non-associative, Figment evaluates layer chains as an explicit, strict left-fold (runLayers) and deliberately omits Semigroup or Monoid instances[cite: 1].Quickstart1. Define Your Configuration RecordHaskell{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE OverloadedStrings #-}
-
-import GHC.Generics (Generic)
 import Data.Aeson (FromJSON)
-import Data.Text (Text)
+import GHC.Generics (Generic)
 import Figment
-import Figment.Error (ConfigError(..))
 
--- Raw intermediate record matching incoming provider key shapes
-data AppConfigRaw = AppConfigRaw
-  { rHost     :: Text
-  , rPort     :: Int
-  , rLogLevel :: Text
-  , rDatabase :: Text
-  } deriving (Generic, FromJSON)
+data AppConfig = AppConfig
+  { host :: String
+  , port :: Int
+  } deriving (Eq, Show, Generic)
+instance FromJSON AppConfig
 
--- Validated runtime configuration
-data AppConfig = AppConfig Text Port Text Text
-
-newtype Port = UnsafePort Int deriving (Eq, Show)
-
-mkPort :: Int -> Either ConfigError Port
-mkPort n
-  | n >= 1 && n <= 65535 = Right (UnsafePort n)
-  | otherwise = Left (ValidationError (Path []) "port must be in 1..65535")
-2. Configure Providers & Load ConfigurationHaskellimport Figment.Provider (EnvPrefixed(..), Defaults(..))
-import Figment.Provider.Toml (TomlFile(..))
-
--- Source configuration layers from defaults, TOML files, and environment variables
-configSource :: Depth -> [IO (Either ConfigError Layer)]
-configSource d =
-  [ fmap Join  <$> tagProvider d (Defaults defaultConfigRaw)
-  , fmap Merge <$> tagProvider d (TomlFile "config.toml")
-  , fmap Merge <$> tagProvider d (EnvPrefixed "APP_")
-  ]
-
-loadConfig :: IO (Either ConfigError AppConfig)
-loadConfig = do
-  -- Resolve layers with default recursion depth (64)
-  rawLayers <- sequence (configSource defaultDepth)
+loadApp :: IO (Either ConfigError AppConfig)
+loadApp = do
+  layers <- sequence
+    [ fmap Join  <$> tagProviderDefault (Defaults (AppConfig "localhost" 8080))
+    , fmap Merge <$> tagProviderDefault (TomlFile "config.toml")
+    , fmap Merge <$> tagProviderDefault (EnvPrefixed "APP_")
+    ]
   pure $ do
-    layers <- sequence rawLayers
-    -- Extract and validate raw configuration
-    raw <- runExtract (runLayers layers) :: Either ConfigError AppConfigRaw
-    AppConfig (rHost raw) 
-      <$> mkPort (rPort raw)
-      <*> pure (rLogLevel raw) 
-      <*> pure (rDatabase raw)
-Compile-Time Provider ChecksTo ensure that required configuration keys with no file-based fallback can be supplied at runtime, use composeChecked[cite: 1]. If a provider list lacks generic fallbacks (such as EnvPrefixed, CliArgs, or Defaults), GHC will reject the program at compile time[cite: 1]:Haskell-- Fails to compile if TomlFile is the only provider and non-file values are needed:
-cfg :: Either ConfigError AppConfig
-cfg = composeChecked @AppConfig @'[TomlFile, EnvPrefixed] layers
-For intentionally file-only configurations, use composeUnchecked to bypass this compile-time constraint[cite: 1].Error HandlingAll pipeline failures are unified into the closed ConfigError sum type[cite: 1]:SourceError FilePath Text: Provider I/O or parsing failure[cite: 1].DepthExceeded Path Depth: Input nesting exceeded caller recursion budget[cite: 1].DecodeError Path Text: Shape or type mismatch during record extraction[cite: 1].MissingKey Path: Required configuration key missing across all layers[cite: 1].ValidationError Path Text: Smart constructor rule violation during boundary validation[cite: 1].ConfigurationError Text Text: Library invariant or precondition violation[cite: 1].
+    ls <- sequence layers
+    composeChecked @AppConfig @'[TomlFile, EnvPrefixed] ls
+What it guarantees
+Depth-bounded tagging. Every provider funnels untrusted input
+through mkTagged, which fails with DepthExceeded at a caller-supplied
+recursion budget instead of exhausting the stack. The default budget is
+64; it is overridable via tagProvider someDepth.
+
+Closed error vocabulary. Every failure is a constructor of
+ConfigError, one per pipeline stage, each carrying the path where the
+failure occurred. No error calls, no untyped exceptions escaping.
+
+Merge algebra with documented laws. Four strategies
+(merge/join/admerge/adjoin) are instances of one algebra. The
+associativity law holds under schema-uniformity; it is tested as a
+property, not assumed. There is deliberately no Semigroup instance,
+because mixed-strategy chains are not associative.
+
+Safe Haskell boundary. The pure core (Value, Merge, Layer,
+Error, Prim) is Safe — GHC has verified it contains no
+unsafePerformIO and cannot violate referential transparency. The IO
+adapters are Trustworthy (ADR 014).
+
+Provenance-preserving extraction. runExtractProv returns the
+decoded record and a Path → Metadata map, so callers can ask which
+layer supplied any given leaf (ADR 012).
+
+Providers
+Type	Supply source	Notes
+JsonFile	JSON file	via aeson
+TomlFile	TOML file	via toml-parser; invalid UTF-8 is rejected as SourceError
+YamlFile	YAML file	via yaml
+EnvPrefixed	Process environment	reads vars with a prefix, lower-cases, splits on _ (ADR 008)
+CliArgs	CLI arguments	--key=value, .-separated nested keys (ADR 010)
+Defaults a	Caller-supplied record	via aeson's ToJSON
+FieldProvider p	Wrap any custom provider	extension point for third-party providers
+Dhall is deliberately not shipped (see ADR 011).
+
+Required and optional fields
+figment does not do field-level coverage checking at the type level —
+that would require guessing what a file provider contains, which is not
+possible (ADR 013). Instead, the discipline matches Rust's figment:
+
+Required fields are any field in your record that has no default.
+If no provider supplies them, runExtract returns
+DecodeError/MissingKey.
+
+Optional fields are Maybe fields, or fields with FromJSON
+defaults. They decode to Nothing / their default when absent.
+
+composeChecked only checks that at least one provider in the chain
+can supply non-file values. That is the compile-time guarantee it makes.
+
+Two extraction functions
+haskell
+runExtract     :: FromJSON a => Tagged -> Either ConfigError a
+runExtractProv :: FromJSON a => Tagged -> Either ConfigError (a, ProvMap)
+Use runExtract when you want the record. Use runExtractProv when you
+want the record plus the ability to ask, for any leaf path, which layer
+supplied it. Both go through the same aeson FromJSON decode; the
+provenance map is built in a second walk of the merged tree.
+
+Compile-time reachability
+composeChecked @R @ps requires ps to contain at least one provider
+that can supply non-file values — EnvPrefixed, CliArgs,
+Defaults R, or a FieldProvider-wrapped custom provider. If not, the
+call fails with a single named TypeError, not an opaque kind mismatch:
+
+text
+Figment: no provider in this chain can supply a field that has no
+file-based value - add EnvPrefixed, CliArgs, Defaults, or wrap a custom
+provider in FieldProvider.
+For deliberately file-only configurations, use composeUnchecked.
+
+Status
+Builds and passes 57 tests on GHC 9.12.1. (GHC 9.14.1 is
+deferred until hashable supports base-4.22 — see ADR 015.)
+
+Version: 0.1.0.0 (pre-release).
+
+License: BSD-3-Clause. See LICENSE.
+
+Design
+The library is governed by ENGINEERING_STANDARD.md (in this repo) and
+was designed against the feasibility study that accompanies this
+release. Every non-obvious decision is recorded in ADRs/:
+
+ADR	Decision
+001	defaultDepth = 64
+002	CPP guard for foldl' import
+003	Manual NFData instances
+004	cabal.project.freeze deferred to CI
+005	QuickCheck < 2.20 bound
+006	runExtract two-pass decode (superseded by 012)
+007	-Wno-redundant-constraints for composeChecked
+008	Env-var key decomposition rule
+009	Orphan Provider instances in adapter modules
+010	CLI argument decomposition rule
+011	Benchmark CI: baseline artifact, no auto-fail thresholds
+012	runExtractProv — provenance-preserving extraction
+013	Field-level coverage is a runtime concern, not type-level
+014	Safe Haskell boundary: Safe core, Trustworthy adapters
+015	GHC 9.14.1 support deferred pending hashable
+Building
+bash
+cabal build all --enable-tests --enable-benchmarks
+cabal test all
+cabal bench all
+Requires GHC 9.12.1 (the current tested compiler). The library is
+expected to work on 9.4.7 through 9.12.1 — the CI matrix verifies this
+on every push.
+EOF

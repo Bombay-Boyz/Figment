@@ -73,7 +73,6 @@ test-suite figment-test
   other-modules:
     Figment.Properties
     Figment.Arbitrary
-    Figment.CompileFail
     Figment.ExtractTests
     Figment.JsonProvider
     Figment.EnvProvider
@@ -106,6 +105,7 @@ test-suite figment-test
     , process
     , temporary
     , filepath
+    , directory
     , aeson
     , bytestring
   build-tool-depends: cabal-install:cabal

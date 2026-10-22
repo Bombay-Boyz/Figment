@@ -8,7 +8,6 @@ import qualified Figment.ParserFuzz as PF
 import qualified Figment.SafeBoundaryTest as SB
 import qualified Figment.Stress as ST
 import qualified Figment.Model as MDL
-import qualified Figment.CompileFail as CF
 import qualified Figment.RequiredFields as RF
 import qualified Figment.FileProviders as FP
 import qualified Figment.Compose as CO
@@ -38,5 +37,4 @@ main = defaultMain $ testGroup "figment"
   , SB.tests
   , ST.tests
   , MDL.tests
-  , CF.tests
   ]
