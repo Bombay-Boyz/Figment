@@ -119,8 +119,6 @@ benchmark figment-bench
   build-depends:
       base
     , figment
-    , containers
-    , scientific
     , text
     , criterion  >= 1.6 && < 1.8
   ghc-options:        -O2 -threaded -rtsopts -with-rtsopts=-N
