@@ -138,7 +138,6 @@ bash
 cabal build all --enable-tests --enable-benchmarks
 cabal test all
 cabal bench all
-Requires GHC 9.12.1 (the current tested compiler). The library is
-expected to work on 9.4.7 through 9.12.1 — the CI matrix verifies this
-on every push.
+Requires GHC 9.10.3 or 9.12.4. These are the only versions verified
+by the maintainer and tested in CI.
 EOF

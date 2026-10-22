@@ -30,29 +30,14 @@ jobs:
     strategy:
       matrix:
         include:
-          - compiler: ghc-9.12.1
+          - compiler: ghc-9.12.4
             compilerKind: ghc
-            compilerVersion: 9.12.1
+            compilerVersion: 9.12.4
             setup-method: ghcup
             allow-failure: false
-          - compiler: ghc-9.10.2
+          - compiler: ghc-9.10.3
             compilerKind: ghc
-            compilerVersion: 9.10.2
-            setup-method: ghcup
-            allow-failure: false
-          - compiler: ghc-9.8.4
-            compilerKind: ghc
-            compilerVersion: 9.8.4
-            setup-method: ghcup
-            allow-failure: false
-          - compiler: ghc-9.6.7
-            compilerKind: ghc
-            compilerVersion: 9.6.7
-            setup-method: ghcup
-            allow-failure: false
-          - compiler: ghc-9.4.7
-            compilerKind: ghc
-            compilerVersion: 9.4.7
+            compilerVersion: 9.10.3
             setup-method: ghcup
             allow-failure: false
       fail-fast: false
@@ -172,11 +157,9 @@ jobs:
           echo "package figment" >> cabal.project
           echo "    ghc-options: -Werror=missing-methods -Werror=missing-fields" >> cabal.project
           echo "package figment" >> cabal.project
+          echo "    ghc-options: -Werror=unused-packages" >> cabal.project
+          echo "package figment" >> cabal.project
           echo "    ghc-options: -Werror=incomplete-patterns -Werror=incomplete-uni-patterns" >> cabal.project
-          # NOTE: -Werror=unused-packages deliberately omitted. Cabal passes
-          # every declared build-depend as -package-id; on GHC 9.10.2 the
-          # -Wunused-packages warning fires for test-suite deps that are
-          # only used in subprocesses (e.g. directory, used by CompileFail).
           cat >> cabal.project <<EOF
           EOF
           $HCPKG list --simple-output --names-only | perl -ne 'for (split /\s+/) { print "constraints: any.$_ installed\n" unless /^(figment)$/; }' >> cabal.project.local
@@ -201,14 +184,10 @@ jobs:
           $CABAL v2-build $ARG_COMPILER --disable-tests --disable-benchmarks all
       - name: build
         run: |
-          $CABAL v2-build $ARG_COMPILER $ARG_TESTS $ARG_BENCH all
+          $CABAL v2-build $ARG_COMPILER $ARG_TESTS $ARG_BENCH all --write-ghc-environment-files=always
       - name: tests
         run: |
           $CABAL v2-test $ARG_COMPILER $ARG_TESTS $ARG_BENCH all --test-show-details=direct
-      - name: compile-fail checks
-        run: |
-          cd source
-          ./scripts/check-compile-fail.sh
       - name: cabal check
         run: |
           cd ${PKGDIR_figment} || false
