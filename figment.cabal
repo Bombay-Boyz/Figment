@@ -99,14 +99,12 @@ test-suite figment-test
     , QuickCheck  >= 2.14.3 && < 2.20
     , tasty       >= 1.4   && < 1.6
     , tasty-quickcheck
-    , tasty-bench
     , tasty-hedgehog
     , hedgehog
     , tasty-hunit
     , tasty-golden
     , process
     , temporary
-    , directory
     , filepath
     , aeson
     , bytestring
