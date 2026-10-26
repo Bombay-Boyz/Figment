@@ -1,4 +1,7 @@
 # ADR 002 — CPP guard for the foldl' import in Figment.Layer
+
+> **Superseded by ADR 016 (0.2.0.0): base >= 4.20 only, so `foldl'` comes from the Prelude and the codebase has no CPP.**
+
 Status: Accepted | Date: 2026-10-21 | Rule: §1.8, §0.7
 
 ## Context

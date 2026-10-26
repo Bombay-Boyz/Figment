@@ -1,0 +1,3 @@
+error: missing field `name`
+  --> key `name`
+  = hint: no source sets it; it can be set as `name` in JSON source string, `APP_NAME` in environment variables (prefix APP_), or `--name` in command-line arguments

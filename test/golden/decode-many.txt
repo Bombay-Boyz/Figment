@@ -1,0 +1,15 @@
+4 configuration errors:
+
+error: missing field `name`
+  --> key `name`
+  = hint: no source sets it; it can be set as `name` in TOML source string, or `APP_NAME` in environment variables (prefix APP_)
+
+error: unknown field `hots`
+  --> key `db.hots` in TOML source string at line 4, column 8
+  = hint: did you mean `host`?
+
+error: invalid value: found integer 70000, expected an integer in the range 0..65535
+  --> key `db.port` in TOML source string at line 3, column 8
+
+error: unknown variant `verbose`, expected one of `Debug`, `Info`
+  --> key `level` (`APP_LEVEL`) in environment variables (prefix APP_)

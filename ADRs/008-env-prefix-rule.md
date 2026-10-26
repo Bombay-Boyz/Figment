@@ -1,4 +1,7 @@
 # ADR 008 — Env-var key decomposition rule
+
+> **Superseded by ADR 019 (0.2.0.0): Rust-compatible environment-variable rule.**
+
 Status: Accepted | Date: 2026-10-21 | Rule: §2.8, §5.7 (RT-03)
 
 ## Context

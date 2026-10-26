@@ -2,39 +2,32 @@ module Main (main) where
 
 import Test.Tasty
 
-import qualified Figment.Adversarial as ADV
-import qualified Figment.GoldenErrors as GE
-import qualified Figment.ParserFuzz as PF
-import qualified Figment.SafeBoundaryTest as SB
-import qualified Figment.Stress as ST
-import qualified Figment.Model as MDL
-import qualified Figment.RequiredFields as RF
-import qualified Figment.FileProviders as FP
-import qualified Figment.Compose as CO
-import qualified Figment.ExtractTests as E
-import qualified Figment.CliProvider as CL
-import qualified Figment.EnvProvider as EP
-import qualified Figment.JsonProvider as J
-import qualified Figment.Precision as PR
-import qualified Figment.ProvTests as PV
-import qualified Figment.Properties as P
+import qualified Figment.Test.Adversarial as Adversarial
+import qualified Figment.Test.Cli as Cli
+import qualified Figment.Test.Decode as Decode
+import qualified Figment.Test.Env as Env
+import qualified Figment.Test.Errors as Errors
+import qualified Figment.Test.Figment as Figment
+import qualified Figment.Test.MergeLaws as MergeLaws
+import qualified Figment.Test.Partial as Partial
+import qualified Figment.Test.Providers as Providers
+import qualified Figment.Test.Readme as Readme
+import qualified Figment.Test.Tutorial as Tutorial
 
 main :: IO ()
-main = defaultMain $ testGroup "figment"
-  [ P.tests
-  , E.tests
-  , J.tests
-  , PR.tests
-  , PV.tests
-  , EP.tests
-  , CL.tests
-  , CO.tests
-  , RF.tests
-  , FP.tests
-  , ADV.tests
-  , GE.tests
-  , PF.tests
-  , SB.tests
-  , ST.tests
-  , MDL.tests
-  ]
+main =
+  defaultMain $
+    testGroup
+      "figment"
+      [ MergeLaws.tests
+      , Figment.tests
+      , Decode.tests
+      , Partial.tests
+      , Providers.tests
+      , Env.tests
+      , Cli.tests
+      , Errors.tests
+      , Adversarial.tests
+      , Readme.tests
+      , Tutorial.tests
+      ]

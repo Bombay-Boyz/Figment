@@ -1,4 +1,7 @@
 # ADR 007 — Disable -Wredundant-constraints in Figment.hs
+
+> **Superseded by ADR 021 (0.2.0.0): `composeChecked` was removed, so the warning suppression went with it.**
+
 Status: Accepted | Date: 2026-10-21 | Rule: §5.1
 
 ## Context

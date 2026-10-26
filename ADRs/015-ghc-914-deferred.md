@@ -1,4 +1,7 @@
 # ADR 015 — GHC 9.14.1 support deferred
+
+> **Amended (0.2.0.0): tested-with is GHC 9.10.3 and 9.12.4 (the earlier 9.4.7 to 9.12.1 range was never actually tested). The stale `cabal.project.freeze.ghc-9.14.1` was removed. 9.14 remains untested.**
+
 Status: Accepted | Date: 2026-10-22 | Rule: §2.11, §5.9
 
 ## Context

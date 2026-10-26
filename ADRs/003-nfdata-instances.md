@@ -1,4 +1,7 @@
 # ADR 003 — Manual NFData instances on the value domain
+
+> **Superseded by ADR 016 (0.2.0.0): NFData instances are derived (`deriving anyclass NFData`) on GHC 9.10 and 9.12. The 9.14 failure this ADR cited was never reproduced on a supported compiler.**
+
 Status: Accepted | Date: 2026-10-21 | Rule: §5.6
 
 ## Context

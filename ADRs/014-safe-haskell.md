@@ -1,4 +1,7 @@
 # ADR 014 — Safe Haskell boundary: Safe core, Trustworthy adapters
+
+> **Superseded by ADR 022 (0.2.0.0): Safe Haskell annotations removed.**
+
 Status: Accepted | Date: 2026-10-21 | Rule: §2.8, §1.7
 
 ## Context

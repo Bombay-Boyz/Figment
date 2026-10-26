@@ -1,4 +1,7 @@
 # ADR 013 — Field-level coverage is a runtime default-value concern, not compile-time
+
+> **Superseded by ADR 021 (0.2.0.0): higher-kinded partial configurations provide a field-level guarantee after all, by construction rather than by inspecting providers.**
+
 Status: Accepted (supersedes earlier draft) | Date: 2026-10-21 | Rule: §2.8, §6.1, §8.4
 
 ## Context

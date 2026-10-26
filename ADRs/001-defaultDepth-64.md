@@ -1,5 +1,8 @@
 # ADR 001 — defaultDepth = 64
 
+> **Amended by ADR 017 (0.2.0.0): the depth budget is now one of two `Limits`, enforced inside every parser; the root dictionary counts as depth 1.**
+
+
 **Status:** Accepted (provisional; see Gate 2(e))
 **Date:** 2026-10-21
 **Standard rule under review:** §5.9 (deviations recorded)

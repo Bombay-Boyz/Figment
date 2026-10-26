@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
+# Compile-time guarantees, checked mechanically (run from the package
+# root after `cabal build`). CABAL may be overridden (CI passes its own).
 set -euo pipefail
+CABAL=${CABAL:-cabal}
 
-check_fails() {
-  local fixture="$1"
-  local expected="$2"
-  local out
-  out=$(cabal exec -- ghc -fno-code "$fixture" 2>&1 || true)
-  if ! grep -q "$expected" <<<"$out"; then
-    echo "FAIL: $fixture did not fail with '$expected'"
-    echo "$out"
-    exit 1
-  fi
-  echo "ok: $fixture fails as expected"
+typecheck() {
+  $CABAL exec -v0 -- ghc -fno-code -package figment -package text "$1" 2>&1
 }
 
-check_compiles() {
-  local fixture="$1"
-  if ! cabal exec -- ghc -fno-code "$fixture" 2>&1; then
-    echo "FAIL: $fixture did not compile"
-    exit 1
+expect_failure() {
+  local fixture="$1" expected="$2" out
+  if out=$(typecheck "$fixture"); then
+    echo "FAIL: $fixture compiled, but must not"; exit 1
+  fi
+  if ! grep -q -- "$expected" <<<"$out"; then
+    echo "FAIL: $fixture failed without the expected message '$expected':"; echo "$out"; exit 1
+  fi
+  echo "ok: $fixture is rejected ($expected)"
+}
+
+expect_success() {
+  local fixture="$1" out
+  if ! out=$(typecheck "$fixture"); then
+    echo "FAIL: $fixture must compile:"; echo "$out"; exit 1
   fi
   echo "ok: $fixture compiles"
 }
 
-check_fails   test/CompileFail/NoProvider.hs  "Figment: no provider"
-check_compiles test/CompileFail/OkProvider.hs
+expect_success test/compile-fail/Ok.hs
+expect_failure test/compile-fail/EmptyType.hs "cannot derive FromConfig for an empty data type"
+expect_failure test/compile-fail/PartialSum.hs "a Partial configuration must be a record with a single constructor"
+expect_failure test/compile-fail/NoValueSemigroup.hs "No instance for .Semigroup Value"

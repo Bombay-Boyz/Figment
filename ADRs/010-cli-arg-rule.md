@@ -1,4 +1,7 @@
 # ADR 010 — CLI argument decomposition rule
+
+> **Superseded by ADR 020 (0.2.0.0): revised CLI rule (flags, `--no-flag`, `--`, malformed options are errors).**
+
 Status: Accepted | Date: 2026-10-21 | Rule: §2.8
 
 ## Decision

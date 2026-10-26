@@ -1,0 +1,10 @@
+3 configuration errors:
+
+error: duplicate key `a`
+  --> key `a` in YAML source string at line 2, column 1
+
+error: syntax error: parse error: unexpected end-of-line
+  --> top level in TOML source string at line 1, column 5
+
+error: `APP_DB` conflicts with `APP_DB__HOST`: one sets a value where the other needs a dictionary
+  --> key `db` (`APP_DB`) in environment variables (prefix APP_)

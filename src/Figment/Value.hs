@@ -1,113 +1,207 @@
-{-# LANGUAGE Safe #-}
+-- | The configuration value tree. Every node carries a t'Tag' recording
+-- which provider and profile it came from, where in the source text it
+-- was written, and (for values parsed from untyped text such as
+-- environment variables) the original text.
 module Figment.Value
-  ( Key(..)
-  , SourceId(..)
-  , Path(..)
-  , Profile(..)
-  , ProfileName(..)
-  , Value(..)
-  , Metadata(..)
-  , Tagged(..)
-  , leafInfo
-  , Depth
-  , mkDepth
-  , defaultDepth
-  , RawJSON(..)
-  , mkTagged
-  , extend
-  , extendIx
+  ( -- * Values
+    Value (..)
+  , Node (..)
+  , Number (..)
+  , Dict
+    -- * Tags
+  , Tag (..)
+  , untagged
+  , retag
+  , setTagMeta
+    -- * Construction
+  , mkValue
+  , string
+  , bool
+  , number
+  , null
+  , array
+  , dict
+  , emptyDict
+    -- * Inspection
+  , lookupPath
+  , describe
+  , kindOf
+  , stripTags
+  , numberFromScientific
   ) where
 
-import Control.DeepSeq (NFData(rnf))
+import Prelude hiding (null)
+
+import Control.DeepSeq (NFData)
 import Data.Map.Strict (Map)
-import GHC.Generics (Generic)
 import qualified Data.Map.Strict as Map
 import Data.Scientific (Scientific)
+import qualified Data.Scientific as Sci
 import Data.Text (Text)
+import qualified Data.Text as Text
+import Data.Vector (Vector)
+import qualified Data.Vector as Vector
+import GHC.Generics (Generic)
 
-import Figment.Error (ConfigError(..))
-import Figment.Prim
-  ( Key(..), SourceId(..), Path(..), Profile(..), ProfileName(..)
-  , Depth(..), defaultDepth, extend, extendIx
-  )
+import Figment.Metadata
+import Figment.Path
+import Figment.Profile
 
-mkDepth :: Int -> Either ConfigError Depth
-mkDepth n
-  | n > 0     = Right (UnsafeDepth n)
-  | otherwise = Left (ConfigurationError "Depth" "must be a positive Int")
+-- | Numbers. Finite values are exact ('Scientific'), so a 30-digit
+-- decimal in a JSON file survives intact; TOML and YAML also allow
+-- infinities and NaN, which are represented explicitly rather than
+-- being smuggled through as nonsense 'Scientific's.
+data Number
+  = Finite !Scientific
+  | PosInfinity
+  | NegInfinity
+  | NaN
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (NFData)
 
-data RawJSON
-  = RawNull
-  | RawBool Bool
-  | RawNum  Scientific
-  | RawStr  Text
-  | RawObj  [(Text, RawJSON)]
-  | RawArr  [RawJSON]
-  deriving (Eq, Show)
+-- | Provenance attached to a value.
+data Tag = Tag
+  { tagMeta :: !(Maybe Metadata)
+  , tagProfile :: !(Maybe Profile)
+  , tagPos :: !(Maybe Pos)
+  , tagRaw :: !(Maybe Text)
+    -- ^ the original text, for values parsed out of untyped text
+    -- (environment variables, CLI arguments). Lets a 'Text' field
+    -- receive @007@ verbatim even though it also parses as a number.
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (NFData)
 
-data Value
-  = VNull
-  | VBool   Bool
-  | VNum    Scientific
-  | VStr    Text
-  | VArr    [Tagged]
-  | VObj    (Map Key Tagged)
-  deriving (Eq, Show, Generic)
-instance NFData Value where
-  rnf VNull        = ()
-  rnf (VBool b)    = rnf b
-  rnf (VNum n)     = rnf n
-  rnf (VStr t)     = rnf t
-  rnf (VArr xs)    = rnf xs
-  rnf (VObj m)     = rnf m
+-- | A tag with no provenance.
+untagged :: Tag
+untagged = Tag Nothing Nothing Nothing Nothing
 
--- | 'Metadata' mirrors '𝕄 = Maybe (SourceId, Profile, Path)' exactly
--- ('Merged' ↔ 'Nothing', 'Leaf' ↔ 'Just').
---
--- 'Leaf' is a positional constructor — no record syntax — because record
--- selectors on a multi-constructor type are partial (they panic on
--- 'Merged'), which Standard §5.2 bans outright. The total accessor
--- 'leafInfo' below is the only way to reach the components.
-data Metadata
-  = Merged
-  | Leaf SourceId Profile Path
-  deriving (Eq, Show, Generic)
-instance NFData Metadata where
-  rnf Merged          = ()
-  rnf (Leaf s p pa)   = rnf s `seq` rnf p `seq` rnf pa
+-- | A dictionary. Keys are kept sorted (Rust figment's default ordering).
+type Dict = Map Text Value
 
--- | The total accessor for 'Leaf': @'Just' (s, p, path)@ for a leaf,
--- 'Nothing' for 'Merged'. Replaces what would otherwise be three
--- partial record selectors.
-leafInfo :: Metadata -> Maybe (SourceId, Profile, Path)
-leafInfo Merged                    = Nothing
-leafInfo (Leaf src prof path')     = Just (src, prof, path')
+-- | The shape of a value.
+data Node
+  = Null
+  | Bool !Bool
+  | Num !Number
+  | String !Text
+  | Array !(Vector Value)
+  | Dict !Dict
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (NFData)
 
-data Tagged = Tagged { tVal :: Value, tMeta :: Metadata }
-  deriving (Eq, Show, Generic)
-instance NFData Tagged where rnf (Tagged v m) = rnf v `seq` rnf m
+-- | A tagged configuration value.
+data Value = Value
+  { valueTag :: !Tag
+  , valueNode :: !Node
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (NFData)
 
-mkTagged :: Depth -> (SourceId, Profile) -> RawJSON -> Either ConfigError Tagged
-mkTagged total@(UnsafeDepth budget) (s, p) = go budget (Path [])
+-- | An untagged value.
+mkValue :: Node -> Value
+mkValue = Value untagged
+
+-- | An untagged string.
+string :: Text -> Value
+string = mkValue . String
+
+-- | An untagged boolean.
+bool :: Bool -> Value
+bool = mkValue . Bool
+
+-- | An untagged finite number.
+number :: Scientific -> Value
+number = mkValue . Num . Finite
+
+-- | The untagged null.
+null :: Value
+null = mkValue Null
+
+-- | An untagged array.
+array :: [Value] -> Value
+array = mkValue . Array . Vector.fromList
+
+-- | An untagged dictionary.
+dict :: [(Text, Value)] -> Value
+dict = mkValue . Dict . Map.fromList
+
+-- | The empty dictionary.
+emptyDict :: Value
+emptyDict = mkValue (Dict Map.empty)
+
+-- | A finite number.
+numberFromScientific :: Scientific -> Number
+numberFromScientific = Finite
+
+-- | Fill in missing provenance (never overwrite: values coming from a
+-- nested t'Figment.Core.Figment' keep their original source).
+retag :: Metadata -> Profile -> Value -> Value
+retag m p = go
   where
-    go :: Int -> Path -> RawJSON -> Either ConfigError Tagged
-    go remaining curPath raw
-      | remaining <= 0 = Left (DepthExceeded curPath total)
-      | otherwise = case raw of
-          RawObj fields ->
-            (VObj . Map.fromList <$>
-              traverse (\(k, v) ->
-                          (,) (Key k) <$> go (remaining - 1) (extend curPath k) v)
-                       fields)
-              `taggedAs` curPath
-          RawArr xs ->
-            (VArr <$>
-              traverse (\(i, v) -> go (remaining - 1) (extendIx curPath i) v)
-                       (zip [0 :: Int ..] xs))
-              `taggedAs` curPath
-          RawNull   -> pure VNull      `taggedAs` curPath
-          RawBool b -> pure (VBool b)  `taggedAs` curPath
-          RawNum  n -> pure (VNum n)   `taggedAs` curPath
-          RawStr  t -> pure (VStr t)   `taggedAs` curPath
-      where
-        taggedAs mv p' = (\v -> Tagged v (Leaf s p p')) <$> mv
+    go (Value t n) = Value (fill t) (goNode n)
+    fill t = t
+      { tagMeta = maybe (Just m) Just (tagMeta t)
+      , tagProfile = maybe (Just p) Just (tagProfile t)
+      }
+    goNode (Array xs) = Array (fmap go xs)
+    goNode (Dict d) = Dict (fmap go d)
+    goNode n = n
+
+-- | Overwrite the metadata of every node (used by providers that learn
+-- their final metadata, e.g. a resolved file path, only when reading).
+setTagMeta :: Metadata -> Value -> Value
+setTagMeta m = go
+  where
+    go (Value t n) = Value t {tagMeta = Just m} (goNode n)
+    goNode (Array xs) = Array (fmap go xs)
+    goNode (Dict d) = Dict (fmap go d)
+    goNode n = n
+
+-- | Follow a path.
+lookupPath :: Path -> Value -> Maybe Value
+lookupPath p v0 = foldl step (Just v0) (segments p)
+  where
+    step Nothing _ = Nothing
+    step (Just (Value _ (Dict d))) (Key k) = Map.lookup k d
+    step (Just (Value _ (Array xs))) (Index i) = xs Vector.!? i
+    step _ _ = Nothing
+
+-- | A short description of a node's kind, for error messages.
+kindOf :: Node -> Text
+kindOf = \case
+  Null -> "null"
+  Bool _ -> "a boolean"
+  Num (Finite s) | Sci.isInteger s -> "an integer"
+  Num _ -> "a number"
+  String _ -> "a string"
+  Array _ -> "an array"
+  Dict _ -> "a dictionary"
+
+-- | Kind plus a preview of the value, e.g. @string "abc"@.
+describe :: Node -> Text
+describe = \case
+  Null -> "null"
+  Bool b -> "boolean " <> (if b then "true" else "false")
+  Num n -> case n of
+    Finite s
+      | Sci.isInteger s, abs (Sci.base10Exponent s) < 64 ->
+          "integer " <> Text.pack (Sci.formatScientific Sci.Fixed (Just 0) s)
+      | otherwise -> "number " <> Text.pack (show s)
+    PosInfinity -> "number inf"
+    NegInfinity -> "number -inf"
+    NaN -> "number nan"
+  String t -> "string " <> Text.pack (show (preview t))
+  Array xs -> "an array of length " <> Text.pack (show (Vector.length xs))
+  Dict _ -> "a dictionary"
+  where
+    preview t
+      | Text.length t > 40 = Text.take 40 t <> "..."
+      | otherwise = t
+
+-- | Remove all provenance (for comparing data only).
+stripTags :: Value -> Value
+stripTags (Value _ n) = Value untagged $ case n of
+  Array xs -> Array (fmap stripTags xs)
+  Dict d -> Dict (fmap stripTags d)
+  other -> other

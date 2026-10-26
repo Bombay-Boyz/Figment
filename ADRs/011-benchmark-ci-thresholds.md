@@ -1,4 +1,7 @@
 # ADR 011 — Benchmark CI: baseline artifact, no auto-fail thresholds yet
+
+> **Amended (0.2.0.0): CI builds the benchmarks and does a smoke run (`--time-limit 0.2`) on every build. Threshold-based failing is still deferred; the "future ADR 012" mentioned below was never written (that number went to provenance).**
+
 Status: Accepted (provisional) | Date: 2026-10-21 | Rule: §5.6
 
 ## Context

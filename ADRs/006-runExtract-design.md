@@ -1,5 +1,8 @@
 # ADR 006 — runExtract design: two-pass decode with provenance reattachment
 
+> **Superseded by ADR 012, which is in turn superseded by ADR 018.**
+
+
 Status: Superseded by ADR 012 | Date: 2026-10-21 | Rule: §2.1, §2.8, §11
 
 ## Context

@@ -1,4 +1,7 @@
 # ADR 005 — QuickCheck upper bound relaxed to < 2.20
+
+> **Amended (0.2.0.0): the test suite now needs QuickCheck >= 2.14 && < 2.17 and no longer depends on hedgehog.**
+
 Status: Accepted | Date: 2026-10-21 | Rule: §2.11
 
 ## Context

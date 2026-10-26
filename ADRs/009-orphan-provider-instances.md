@@ -1,4 +1,7 @@
 # ADR 009 — Provider instances are orphans in their adapter modules
+
+> **Superseded (0.2.0.0): each provider type is now defined in the same module as its `Provider` instance, so there are no orphan instances.**
+
 Status: Accepted | Date: 2026-10-21 | Rule: §1.7, §2.6
 
 ## Context

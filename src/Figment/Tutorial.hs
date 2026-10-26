@@ -1,0 +1,539 @@
+-- | A guided tour of figment, from a first configuration file to
+-- writing your own provider. Every snippet here is compiled and run by
+-- the package's test suite (@test\/Figment\/Test\/Tutorial.hs@).
+--
+-- The examples assume these imports and extensions:
+--
+-- > {-# LANGUAGE DeriveAnyClass, DeriveGeneric, DerivingStrategies #-}
+-- > {-# LANGUAGE OverloadedStrings, TypeApplications, TypeFamilies #-}
+-- >
+-- > import Data.Aeson ((.=))
+-- > import qualified Data.Aeson as Aeson
+-- > import Data.Function ((&))
+-- > import qualified Data.Map.Strict as Map
+-- > import Data.Text (Text)
+-- > import GHC.Generics (Generic)
+-- >
+-- > import qualified Figment as F
+-- > import qualified Figment.Jail as Jail
+-- > import qualified Figment.Provider.Env as Env
+--
+-- "Figment" is meant to be imported qualified: it exports names such as
+-- 'Figment.merge', 'Figment.join' and 'Figment.from'.
+module Figment.Tutorial
+  ( -- * 1. The idea
+    -- $idea
+
+    -- * 2. Your first configuration
+    -- $first
+
+    -- * 3. Layering sources
+    -- $layering
+
+    -- * 4. Environment variables
+    -- $env
+
+    -- * 5. Command-line arguments
+    -- $cli
+
+    -- * 6. Profiles
+    -- $profiles
+
+    -- * 7. Reading errors
+    -- $errors
+
+    -- * 8. Decoding in depth
+    -- $decoding
+
+    -- * 9. Provenance in your own types
+    -- $provenance
+
+    -- * 10. Partial configurations
+    -- $partial
+
+    -- * 11. For library authors
+    -- $libraries
+
+    -- * 12. Writing a provider
+    -- $providers
+
+    -- * 13. Testing
+    -- $testing
+
+    -- * 14. Untrusted input
+    -- $limits
+
+    -- * 15. Coming from Rust figment
+    -- $rust
+
+    -- * 16. Upgrading from figment 0.1
+    -- $upgrade
+  ) where
+
+-- $idea
+--
+-- Configuration usually comes from several places at once: defaults in
+-- code, a file, environment variables, a few command-line flags. figment
+-- lets you list those sources in order of precedence, combines them
+-- into one tree, and decodes the tree into your own types.
+--
+-- Two ideas make it pleasant:
+--
+-- * Every value remembers where it came from: which source, which
+--   profile, which line and column, and the name the user would type to
+--   set it (@APP_PORT@, @--port@).
+--
+-- * Problems are collected, not thrown one at a time. A misspelt key, a
+--   port out of range and a missing field are reported together, each
+--   pointing at its source.
+--
+-- The moving parts are /providers/ (sources of configuration), the
+-- t'Figment.Figment' (an ordered list of providers), 'Figment.load'
+-- (reads every provider), and 'Figment.FromConfig' (decodes into your
+-- types).
+
+-- $first
+--
+-- Describe the configuration as a record and derive
+-- 'Figment.FromConfig' through "GHC.Generics":
+--
+-- > data Config = Config
+-- >   { name :: Text
+-- >   , port :: Int
+-- >   , debug :: Bool
+-- >   }
+-- >   deriving stock (Show, Eq, Generic)
+-- >   deriving anyclass (F.FromConfig)
+--
+-- Read it from a TOML file:
+--
+-- > firstFigment :: F.Figment
+-- > firstFigment = F.from (F.file F.toml "App.toml")
+-- >
+-- > main :: IO ()
+-- > main = do
+-- >   cfg <- F.loadExtractOrThrow @Config firstFigment
+-- >   print cfg
+--
+-- with an @App.toml@ such as
+--
+-- > name = "demo"
+-- > port = 8080
+-- > debug = false
+--
+-- 'Figment.file' looks for a relative path in the working directory and
+-- then in each parent directory, and a missing file simply contributes
+-- nothing. Use 'Figment.fileExact' to disable the search and
+-- 'Figment.required' to make a missing file an error. 'Figment.json' and
+-- 'Figment.yaml' work the same way, and 'Figment.fromText' reads
+-- configuration held in memory.
+--
+-- 'Figment.loadExtractOrThrow' throws t'Figment.ConfigErrors', whose
+-- 'Control.Exception.displayException' is the full report. Use
+-- 'Figment.loadExtract' to get an 'Either' instead.
+
+-- $layering
+--
+-- Most programs combine several sources. Later sources win:
+--
+-- > layered :: [Text] -> F.Figment
+-- > layered args =
+-- >   F.new
+-- >     & F.merge (F.defaults (Aeson.object ["port" .= (8080 :: Int), "debug" .= False]))
+-- >     & F.merge (F.file F.toml "App.toml")
+-- >     & F.merge (F.prefixed "APP_")
+-- >     & F.merge (F.cli args)
+--
+-- Here a built-in default is overridden by the file, the file by
+-- environment variables such as @APP_PORT=9000@, and those by flags
+-- such as @--port=9100@. 'Figment.defaults' accepts any value with a
+-- 'Data.Aeson.ToJSON' instance, including your own record.
+--
+-- Four strategies decide what happens when two sources set the same key
+-- (they are those of Rust figment):
+--
+-- * 'Figment.merge': the incoming value wins;
+--
+-- * 'Figment.join': the existing value wins, so the incoming source only
+--   fills gaps;
+--
+-- * 'Figment.admerge' and 'Figment.adjoin': the same, except that arrays
+--   are concatenated instead of replaced.
+--
+-- Dictionaries are always combined key by key, recursively. A @null@ is
+-- an ordinary value: merging @null@ over a key replaces it.
+--
+-- A t'Figment.Figment' is only a description; building one performs no
+-- IO. 'Figment.load' reads every source in order and reports every
+-- failure (an unreadable file /and/ a syntax error elsewhere), then
+-- 'Figment.extract' decodes. 'Figment.loadExtract' does both.
+
+-- $env
+--
+-- @F.prefixed \"APP_\"@ ('Figment.prefixed') reads every variable whose name starts
+-- with @APP_@ (in any case), removes the prefix and lower-cases the
+-- rest: @APP_MAX_CONNECTIONS@ sets @max_connections@. There is no
+-- nesting unless you ask for it:
+--
+-- > data Db = Db {host :: Text, port :: Int}
+-- >   deriving stock (Show, Eq, Generic)
+-- >   deriving anyclass (F.FromConfig)
+-- >
+-- > newtype WithDb = WithDb {db :: Db}
+-- >   deriving stock (Show, Eq, Generic)
+-- >   deriving anyclass (F.FromConfig)
+-- >
+-- > dbFromEnv :: F.Figment
+-- > dbFromEnv = F.from (F.prefixed "APP_" & Env.split "__")
+--
+-- With @APP_DB\__HOST=db.internal@ and @APP_DB\__PORT=5432@ this decodes
+-- to @WithDb (Db \"db.internal\" 5432)@.
+--
+-- Values are typed: @5432@ is a number, @true@ a boolean, @[1, 2]@ an
+-- array and @{a = 1}@ a dictionary; anything else is a string. The
+-- original text is kept too, so a 'Data.Text.Text' field set to @007@
+-- receives @\"007\"@, not @7@. Two variables that cannot both hold (for
+-- example @APP_DB=x@ next to @APP_DB\__HOST=y@) are reported as an
+-- error naming both.
+--
+-- "Figment.Provider.Env" has the remaining options:
+-- 'Figment.Provider.Env.only', 'Figment.Provider.Env.ignore',
+-- 'Figment.Provider.Env.mapKeys', 'Figment.Provider.Env.filterKeys',
+-- 'Figment.Provider.Env.lowercase', 'Figment.Provider.Env.ignoreEmpty',
+-- 'Figment.Provider.Env.unparsed', 'Figment.Provider.Env.inProfile' and
+-- 'Figment.Provider.Env.global'.
+
+-- $cli
+--
+-- @F.cli args@ ('Figment.cli'), or 'Figment.cliFromProcess', understands
+--
+-- * @--key=value@ (the value is typed as for environment variables);
+--
+-- * @--flag@ (true) and @--no-flag@ (false);
+--
+-- * @--db.port=5432@ (dots nest) and @--max-connections=5@ (dashes
+--   become underscores);
+--
+-- * @--@, which ends option parsing.
+--
+-- Everything else is positional; 'Figment.Provider.Cli.parseArgs'
+-- returns it. @--key value@ (with a space) is deliberately not
+-- supported: without knowing which options take values it cannot be told
+-- apart from a flag followed by a positional argument. For a full
+-- command-line interface, parse with optparse-applicative and pass the
+-- result in with 'Figment.defaults', as Rust figment recommends with
+-- clap.
+
+-- $profiles
+--
+-- A profile is a named slice of configuration. With 'Figment.nested',
+-- the top-level tables of a file are profiles:
+--
+-- > [default]
+-- > name = "app"
+-- > port = 8080
+-- > debug = true
+-- >
+-- > [production]
+-- > port = 80
+-- > debug = false
+--
+-- > profiled :: F.Profile -> F.Figment
+-- > profiled p =
+-- >   F.new
+-- >     & F.merge (F.nested (F.file F.toml "App.toml"))
+-- >     & F.select p
+--
+-- @profiled F.Default@ decodes to @Config \"app\" 8080 True@, and
+-- @profiled \"production\"@ to @Config \"app\" 80 False@.
+--
+-- On extraction, the 'Figment.Default' profile is merged with the
+-- selected profile, and the 'Figment.Global' profile is merged over
+-- both. Profile names are case-insensitive. To choose the profile at
+-- run time, use 'Figment.profileFromEnv', for example
+-- @F.profileFromEnv \"APP_PROFILE\" F.Default@.
+-- 'Figment.reselect' switches the profile of an already loaded
+-- configuration without reading anything again.
+
+-- $errors
+--
+-- A report looks like this:
+--
+-- > 4 configuration errors:
+-- >
+-- > error: missing field `name`
+-- >   --> key `name`
+-- >   = hint: no source sets it; it can be set as `name` in TOML file /srv/app/App.toml, or `APP_NAME` in environment variables (prefix APP_)
+-- >
+-- > error: unknown field `hots`
+-- >   --> key `db.hots` in TOML file /srv/app/App.toml:4:8
+-- >   = hint: did you mean `host`?
+-- >
+-- > error: invalid value: found integer 70000, expected an integer in the range 0..65535
+-- >   --> key `db.port` in TOML file /srv/app/App.toml:3:8
+-- >
+-- > error: unknown variant `verbose`, expected one of `Debug`, `Info`
+-- >   --> key `level` (`APP_LEVEL`) in environment variables (prefix APP_)
+--
+-- Errors are also plain values. 'Figment.errorList' gives each
+-- t'Figment.ConfigError', with its 'Figment.errorKind',
+-- 'Figment.errorPath', 'Figment.errorMetadata' (the source),
+-- 'Figment.errorPos' (line and column) and 'Figment.errorHints'. For
+-- example, decoding @name = 1@ into @Config@ gives
+--
+-- > [ InvalidType "integer 1" "a string"
+-- > , MissingField "port"
+-- > , MissingField "debug" ]
+--
+-- 'Figment.renderErrors' produces the report shown above.
+
+-- $decoding
+--
+-- Generic decoding maps records to dictionaries. Optional fields have
+-- type 'Maybe'. Enumerations are strings, matched case-insensitively.
+-- Other sum types are externally tagged (@{ Circle = { radius = 1 } }@).
+-- Newtypes unwrap, and constructors with unnamed fields are arrays.
+--
+-- 'Figment.genericDecoder' takes t'Figment.Options':
+--
+-- > data Level = Debug | Info | Warning
+-- >   deriving stock (Show, Eq, Generic)
+-- >   deriving anyclass (F.FromConfig)
+-- >
+-- > data Server = Server
+-- >   { listenAddress :: Text
+-- >   , maxConnections :: Int
+-- >   , logLevel :: Level
+-- >   }
+-- >   deriving stock (Show, Eq, Generic)
+-- >
+-- > instance F.FromConfig Server where
+-- >   fromConfig =
+-- >     F.genericDecoder
+-- >       F.defaultOptions
+-- >         { F.fieldLabelModifier = F.snakeCase
+-- >         , F.rejectUnknownFields = True
+-- >         }
+--
+-- This reads @listen_address@, @max_connections@ and @log_level: info@,
+-- and reports any other key as an unknown field, with a suggestion when
+-- the key looks like a typo.
+--
+-- Hand-written decoders use an applicative that /accumulates/ errors.
+-- Validation keeps the location of the value:
+--
+-- > newtype Port = Port Int
+-- >
+-- > instance F.FromConfig Port where
+-- >   fromConfig = F.validate check F.fromConfig
+-- >     where
+-- >       check n
+-- >         | n > 0 && n < 65536 = Right (Port n)
+-- >         | otherwise = Left "a port must be between 1 and 65535"
+-- >
+-- > data Endpoint = Endpoint {url :: Text, timeout :: Int, retries :: Int}
+-- >
+-- > instance F.FromConfig Endpoint where
+-- >   fromConfig =
+-- >     Endpoint
+-- >       <$> F.field "url"
+-- >       <*> F.fieldOr "timeout" 30
+-- >       <*> F.fieldOr "retries" 3
+--
+-- t'Figment.Decoder' deliberately has no 'Monad' instance, because a
+-- monad has to stop at the first error. When one step really depends on
+-- another, use 'Figment.andThen'.
+--
+-- Decoding is strict: the string @\"8080\"@ is not an 'Int'.
+-- 'Figment.extractLossy' accepts strings for numbers and booleans. Use
+-- 'Figment.extractAt' to decode a single key path, for example
+-- @F.extractAt (F.keyPath \"api\") loaded@. Types with an existing
+-- 'Data.Aeson.FromJSON' instance can be reused with
+-- @deriving F.FromConfig via F.ViaAeson T@.
+
+-- $provenance
+--
+-- Two types carry provenance into your configuration:
+--
+-- > data Paths = Paths
+-- >   { dataDir :: F.RelativePath
+-- >   , token :: F.Tagged Text
+-- >   }
+-- >   deriving stock (Show, Eq, Generic)
+-- >
+-- > instance F.FromConfig Paths where
+-- >   fromConfig = F.genericDecoder F.defaultOptions {F.fieldLabelModifier = F.snakeCase}
+--
+-- If @conf\/app.toml@ says @data_dir = \"data\"@, then
+-- @F.relative (dataDir paths)@ is @conf\/data@: the path is resolved
+-- against the file that wrote it, not the working directory.
+-- t'Figment.Tagged' holds the value together with its source, profile,
+-- position and path, so that later validation can report precisely
+-- where a value came from. On a loaded configuration,
+-- 'Figment.findMetadata', 'Figment.findValue' and 'Figment.contains'
+-- answer the same questions for any key path.
+
+-- $partial
+--
+-- Declare the configuration once, parameterised by a functor, and get
+-- both a total and a partial version of it:
+--
+-- > data AppF f = App
+-- >   { appName :: F.Field f Text
+-- >   , workers :: F.Field f Int
+-- >   , motd :: F.Field f (Maybe Text)
+-- >   }
+-- >   deriving stock (Generic)
+-- >
+-- > instance F.Partial AppF
+-- >
+-- > type App = AppF F.Identity          -- appName :: Text, workers :: Int, ...
+-- >
+-- > appDefaults :: AppF Maybe
+-- > appDefaults = (F.emptyPartial @AppF) {workers = Just 4}
+--
+-- @F.extractPartial appDefaults loaded@ decodes whatever the sources
+-- provide, fills the gaps from the defaults, and reports /every/ field
+-- that is still missing, together with the variable, flag or key that
+-- would set it. 'Maybe' fields are never missing.
+--
+-- 'Figment.extractTotal' takes complete defaults (an @AppF Identity@),
+-- and its type guarantees that a missing-field error cannot happen.
+-- Partial records can be nested (a field of type @DbF f@), and
+-- 'Figment.overlay', 'Figment.complete' and 'Figment.total' let you
+-- layer partial values yourself.
+
+-- $libraries
+--
+-- A library can publish its configuration as a t'Figment.Figment'.
+-- Applications append their own sources with '<>':
+--
+-- > libraryFigment :: F.Figment
+-- > libraryFigment =
+-- >   F.new
+-- >     & F.merge (F.defaults (Aeson.object ["workers" .= (4 :: Int)]))
+-- >     & F.merge (F.prefixed "MYLIB_")
+-- >
+-- > applicationFigment :: F.Figment
+-- > applicationFigment = libraryFigment <> F.from (F.file F.toml "MyApp.toml")
+--
+-- t'Figment.Figment' is a lawful 'Monoid', so this grouping is safe.
+-- A t'Figment.Figment' is also a provider: @F.merge libraryFigment@
+-- nests it, and every inner value keeps its original source.
+
+-- $providers
+--
+-- A provider has a name, and an action that returns one dictionary per
+-- profile:
+--
+-- > newtype Secrets = Secrets (Map.Map Text Text)
+-- >
+-- > instance F.Provider Secrets where
+-- >   metadata _ = F.named "secrets service"
+-- >   provide _limits (Secrets m) =
+-- >     pure (Right (Map.singleton F.Default (fmap (F.Value untaggedTag . F.String) m)))
+-- >
+-- > untaggedTag :: F.Tag
+-- > untaggedTag = F.Tag Nothing Nothing Nothing Nothing
+--
+-- 'Figment.load' fills in the provider's metadata and profile for every
+-- value, so error messages name the secrets service. A provider that
+-- parses untrusted text should respect the t'Figment.Limits' it is
+-- given. Any synchronous exception that escapes 'Figment.provide' is
+-- turned into an 'Figment.IoError' for that provider. For a new file
+-- format, write a t'Figment.Format' instead (a name and a parser); see
+-- "Figment.Provider.Format".
+
+-- $testing
+--
+-- 'Figment.Jail.withJail' runs a test in a fresh temporary directory,
+-- with a snapshot of the environment, and restores both afterwards:
+--
+-- > Jail.withJail $ \j -> do
+-- >   _ <- Jail.createFile j "App.toml" "name = \"demo\"\nport = 9000\n"
+-- >   Jail.setEnv j "APP_DEBUG" "true"
+-- >   cfg <- F.loadExtractOrThrow (layered ["--port=9100"])
+-- >   cfg @?= Config "demo" 9100 True
+--
+-- Jails are serialised across the whole process, so they are safe under
+-- a parallel test runner. To avoid global state altogether, give the
+-- environment provider fixed variables:
+--
+-- > F.from (Env.fromList [("APP_PORT", "1")] (F.prefixed "APP_"))
+
+-- $limits
+--
+-- Every bundled parser enforces t'Figment.Limits' /while/ parsing:
+-- nesting depth (64 by default) and the number of values (one million).
+-- A megabyte of @[[[[@ is rejected at depth 65 without being built.
+-- YAML aliases count at their expanded size, which defeats \"billion
+-- laughs\" documents. Change the limits with 'Figment.withLimits' and
+-- 'Figment.mkLimits'. Duplicate keys are errors, invalid UTF-8 is
+-- rejected rather than replaced, and YAML uses the 1.2 core schema, so
+-- @no@ stays a string.
+
+-- $rust
+--
+-- The same concepts, side by side (Rust first):
+--
+-- * @Figment::new().merge(p)@ is @F.new & F.merge p@; @join@, @adjoin@
+--   and @admerge@ keep their names.
+--
+-- * @Toml::file(p)@ is @F.file F.toml p@; @.nested()@ is
+--   'Figment.nested'; @Toml::string(s)@ is @F.fromText F.toml s@.
+--
+-- * @Env::prefixed(\"APP_\").split(\"\__\")@ is
+--   @F.prefixed \"APP_\" & Env.split \"\__\"@.
+--
+-- * @Serialized::defaults(x)@ is @F.defaults x@.
+--
+-- * @.select(\"prod\")@ is @F.select \"prod\"@.
+--
+-- * @.extract::\<T\>()@ is @F.loadExtract \@T fig@;
+--   @.extract_inner(\"a.b\")@ is @F.extractAt (F.keyPath \"a.b\")@;
+--   @.extract_lossy()@ is 'Figment.extractLossy'.
+--
+-- * @focus@, @find_value@ and @contains@ are 'Figment.focus',
+--   'Figment.findValue' and 'Figment.contains'.
+--
+-- * @Tagged\<T\>@ and @RelativePathBuf@ are t'Figment.Tagged' and
+--   t'Figment.RelativePath'.
+--
+-- * @Jail::expect_with@ is 'Figment.Jail.withJail'.
+--
+-- * @#[derive(Deserialize)]@ is @deriving anyclass F.FromConfig@.
+--
+-- What is different: all errors are reported at once, not just the
+-- first; TOML and YAML values carry line and column; missing fields come
+-- with hints; partial configurations give a type-level guarantee
+-- ('Figment.extractTotal'); environment variable conflicts are errors;
+-- and @--key value@ CLI pairs are not parsed (use optparse-applicative).
+
+-- $upgrade
+--
+-- Version 0.2 is a redesign. The main replacements:
+--
+-- * @runLayers [Merge t, ...]@ and @composeChecked@: build a
+--   t'Figment.Figment' with 'Figment.merge' and friends, then
+--   'Figment.loadExtract'. The compile-time guarantee now comes from
+--   'Figment.extractTotal'.
+--
+-- * @tagProviderDefault (TomlFile p)@: @F.file F.toml p@ (or
+--   'Figment.fileExact' with 'Figment.required' to keep 0.1's \"must
+--   exist\" behaviour).
+--
+-- * @EnvPrefixed \"APP_\"@: @F.prefixed \"APP_\" & Env.split \"_\"@
+--   reproduces 0.1's splitting; plain @F.prefixed \"APP_\"@ is
+--   recommended.
+--
+-- * @CliArgs args@: @F.cli args@.
+--
+-- * @Defaults r@: @F.defaults r@.
+--
+-- * @FromJSON@-only types: add @deriving F.FromConfig via F.ViaAeson T@,
+--   or derive 'Figment.FromConfig' directly.
+--
+-- * @runExtractProv@: use 'Figment.findMetadata', or t'Figment.Tagged'
+--   fields.
+--
+-- * @Depth@ and @mkDepth@: t'Figment.Limits' and 'Figment.mkLimits'.

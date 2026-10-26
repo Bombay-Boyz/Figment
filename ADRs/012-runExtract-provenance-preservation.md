@@ -1,4 +1,7 @@
 # ADR 012 — runExtract provenance-preserving decode (supersedes ADR 006)
+
+> **Superseded by ADR 018 (0.2.0.0): the native decoder carries provenance into every error and into `Tagged` fields, so a separate `ProvMap` is unnecessary. (The `Provenanced` class described below was never implemented.)**
+
 Status: Accepted | Date: 2026-10-21 | Rule: §2.1, §2.8, §11
 
 ## Context
