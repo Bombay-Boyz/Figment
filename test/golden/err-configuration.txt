@@ -1,1 +1,0 @@
-ConfigurationError "Depth" "must be a positive Int"

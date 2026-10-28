@@ -41,6 +41,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
+import qualified Data.Vector.Mutable as MVector
 import GHC.Generics (Generic)
 
 import Figment.Metadata
@@ -134,33 +135,50 @@ emptyDict = mkValue (Dict Map.empty)
 numberFromScientific :: Scientific -> Number
 numberFromScientific = Finite
 
+-- | Rebuild a tree, applying a function to every tag.
+--
+-- The rebuild is /strict/: when the result is forced, every node has been
+-- built. ('fmap' over a 'Data.Map.Strict.Map' or a boxed 'Vector.Vector' is
+-- lazy in the elements, and would leave a thunk per child that keeps the
+-- original tree alive until it is touched.)
+mapTags :: (Tag -> Tag) -> Value -> Value
+mapTags f = go
+  where
+    go (Value t n) = Value (f t) (goNode n)
+    goNode (Array xs) = Array (mapVector' go xs)
+    goNode (Dict d) = Dict (Map.map go d)
+    goNode n = n
+
+-- | 'Vector.map' that evaluates every element before the vector is
+-- returned.
+mapVector' :: (a -> b) -> Vector a -> Vector b
+mapVector' f v = Vector.create $ do
+  mv <- MVector.new (Vector.length v)
+  Vector.iforM_ v $ \i x -> let y = f x in y `seq` MVector.write mv i y
+  pure mv
+
 -- | Fill in missing provenance (never overwrite: values coming from a
 -- nested t'Figment.Core.Figment' keep their original source).
 retag :: Metadata -> Profile -> Value -> Value
-retag m p = go
+retag m p = mapTags fill
   where
-    go (Value t n) = Value (fill t) (goNode n)
+    jm = Just m
+    jp = Just p
     fill t = t
-      { tagMeta = maybe (Just m) Just (tagMeta t)
-      , tagProfile = maybe (Just p) Just (tagProfile t)
+      { tagMeta = case tagMeta t of Nothing -> jm; old -> old
+      , tagProfile = case tagProfile t of Nothing -> jp; old -> old
       }
-    goNode (Array xs) = Array (fmap go xs)
-    goNode (Dict d) = Dict (fmap go d)
-    goNode n = n
 
 -- | Overwrite the metadata of every node (used by providers that learn
 -- their final metadata, e.g. a resolved file path, only when reading).
 setTagMeta :: Metadata -> Value -> Value
-setTagMeta m = go
+setTagMeta m = mapTags (\t -> t {tagMeta = jm})
   where
-    go (Value t n) = Value t {tagMeta = Just m} (goNode n)
-    goNode (Array xs) = Array (fmap go xs)
-    goNode (Dict d) = Dict (fmap go d)
-    goNode n = n
+    jm = Just m
 
 -- | Follow a path.
 lookupPath :: Path -> Value -> Maybe Value
-lookupPath p v0 = foldl step (Just v0) (segments p)
+lookupPath p v0 = foldl' step (Just v0) (segments p)
   where
     step Nothing _ = Nothing
     step (Just (Value _ (Dict d))) (Key k) = Map.lookup k d
@@ -196,12 +214,9 @@ describe = \case
   Dict _ -> "a dictionary"
   where
     preview t
-      | Text.length t > 40 = Text.take 40 t <> "..."
+      | Text.compareLength t 40 == GT = Text.take 40 t <> "..."
       | otherwise = t
 
 -- | Remove all provenance (for comparing data only).
 stripTags :: Value -> Value
-stripTags (Value _ n) = Value untagged $ case n of
-  Array xs -> Array (fmap stripTags xs)
-  Dict d -> Dict (fmap stripTags d)
-  other -> other
+stripTags = mapTags (const untagged)

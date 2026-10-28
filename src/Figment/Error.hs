@@ -28,6 +28,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
 
+import Figment.Internal.Text (escapeControl)
 import Figment.Metadata
 import Figment.Path
 import Figment.Profile
@@ -43,6 +44,9 @@ data ErrorKind
     -- ^ nesting deeper than the configured limit (the limit is carried)
   | TooManyNodes !Int
     -- ^ more values than the configured limit (the limit is carried)
+  | TooManyBytes !Int
+    -- ^ a source larger than the configured size limit (the limit, in
+    -- bytes, is carried)
   | DuplicateKey !Text
     -- ^ the same key appears twice in one dictionary of one source
   | KeyConflict !Text !Text
@@ -131,10 +135,11 @@ addHints hs e = e {errorHints = errorHints e ++ hs}
 -- | The one-line description of an error kind.
 describeKind :: ErrorKind -> Text
 describeKind = \case
-  IoError t -> "could not read source: " <> t
-  SyntaxError t -> "syntax error: " <> t
+  IoError t -> "could not read source: " <> escapeControl t
+  SyntaxError t -> "syntax error: " <> escapeControl t
   DepthExceeded n -> "nesting exceeds the depth limit of " <> tshow n
   TooManyNodes n -> "source contains more than the limit of " <> tshow n <> " values"
+  TooManyBytes n -> "source is larger than the limit of " <> tshow n <> " bytes"
   DuplicateKey k -> "duplicate key " <> tick k
   KeyConflict a b -> tick a <> " conflicts with " <> tick b
     <> ": one sets a value where the other needs a dictionary"
@@ -175,8 +180,8 @@ renderError e =
       _ -> ""
     sourcePart = case errorMetadata e of
       Nothing -> ""
-      Just m -> " in " <> metaName m <> case metaSource m of
-        Just s -> " " <> renderSource s <> posSuffix
+      Just m -> " in " <> escapeControl (metaName m) <> case metaSource m of
+        Just s -> " " <> escapeControl (renderSource s) <> posSuffix
         Nothing -> posWords
     posSuffix = case errorPos e of
       Just (Pos l c) -> ":" <> tshow l <> ":" <> tshow c
@@ -192,15 +197,30 @@ renderError e =
       in ["  --> " <> line]
 
 -- | Render every error, separated by blank lines, with a count header
--- when there is more than one.
+-- when there is more than one. At most 'renderLimit' errors are shown,
+-- followed by the number that were left out, so a pathological source
+-- cannot produce an unreadable (or enormous) report.
 renderErrors :: ConfigErrors -> Text
 renderErrors (ConfigErrors (e :| [])) = renderError e
 renderErrors (ConfigErrors es) =
   tshow (length es) <> " configuration errors:\n\n"
-    <> Text.intercalate "\n\n" (map renderError (NE.toList es))
+    <> Text.intercalate "\n\n" (map renderError shown)
+    <> omitted
+  where
+    (shown, rest) = splitAt renderLimit (NE.toList es)
+    omitted
+      | null rest = ""
+      | otherwise = "\n\n... and " <> tshow (length rest) <> " more errors not shown"
 
+-- | The most errors 'renderErrors' prints.
+renderLimit :: Int
+renderLimit = 100
+
+-- | Quote a piece of data for a message. Control characters are escaped, so
+-- a key or file name chosen by someone else cannot forge extra lines or
+-- terminal escape sequences in a report.
 tick :: Text -> Text
-tick t = "`" <> t <> "`"
+tick t = "`" <> escapeControl t <> "`"
 
 tshow :: Show a => a -> Text
 tshow = Text.pack . show

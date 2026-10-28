@@ -16,18 +16,18 @@ import Control.Applicative ((<|>))
 import Control.Exception (try)
 import Data.ByteString (ByteString)
 import Data.Char (isDigit, isHexDigit, isOctDigit)
-import Data.Conduit (runConduitRes, (.|))
-import qualified Data.Conduit.List as CL
+import Data.Conduit (ConduitT, await, runConduitRes, (.|))
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TE
 import qualified Data.Vector as Vector
-import Numeric (readHex, readOct)
 import qualified Text.Libyaml as Y
 
 import Figment.Error
+import Figment.Internal.Budget (checkBytes)
+import Figment.Internal.Number (integerFromDigits)
 import Figment.Internal.ValueParser (parseNumber)
 import Figment.Limits
 import Figment.Metadata (Pos (..))
@@ -41,15 +41,58 @@ yaml = Format "YAML" parseYaml
 
 -- | Parse a YAML document, enforcing the limits.
 parseYaml :: Limits -> ByteString -> IO (Either ConfigError Value)
-parseYaml lim bs = do
-  r <- try (runConduitRes (Y.decodeMarked bs .| CL.consume))
-  pure $ case r of
-    Left (Y.YamlException msg) -> Left (configError (SyntaxError (Text.pack msg)))
-    Left (Y.YamlParseException problem ctx mark) ->
-      Left (withPos (Just (markPos mark))
-        (configError (SyntaxError (Text.pack (problem ++ (if null ctx then "" else " " ++ ctx))))))
-    Right [] -> Right emptyDict
-    Right events -> fst <$> runY document (YState events Map.empty (maxNodes lim)) lim
+parseYaml lim bs = case checkBytes lim bs of
+  Left e -> pure (Left e)
+  Right () -> do
+    r <- try (runConduitRes (Y.decodeMarked bs .| collectEvents lim))
+    pure $ case r of
+      Left (Y.YamlException msg) -> Left (configError (SyntaxError (Text.pack msg)))
+      Left (Y.YamlParseException problem ctx mark) ->
+        Left (withPos (Just (markPos mark))
+          (configError (SyntaxError (Text.pack (problem ++ (if null ctx then "" else " " ++ ctx))))))
+      Right (Left e) -> Left e
+      Right (Right []) -> Right emptyDict
+      Right (Right events) -> fst <$> runY document (YState events Map.empty (maxNodes lim)) lim
+
+-- | Gather the events of the stream, but give up the moment the stream is
+-- known to break a limit, rather than materialising all of it first.
+--
+-- * nesting is counted from the start/end events, so a hostile
+--   @[[[[...@ is rejected at depth 'maxDepth' + 1, however long it is;
+-- * every value the document builds is a node charged against 'maxNodes',
+--   and each event is a value, a key (at most one per value) or the end
+--   of a container (at most one per container), so a document within the
+--   node limit has at most @3 * maxNodes@ events (plus the stream and
+--   document framing). More than that cannot be within the limit.
+--
+-- Together with the size limit this bounds the memory held here, whatever
+-- the input.
+collectEvents
+  :: Monad m
+  => Limits
+  -> ConduitT Y.MarkedEvent o m (Either ConfigError [Y.MarkedEvent])
+collectEvents lim = go (0 :: Int) (0 :: Int) []
+  where
+    cap
+      | maxNodes lim > (maxBound - 16) `div` 3 = maxBound
+      | otherwise = 3 * maxNodes lim + 16
+    go !depth !count acc = do
+      me <- await
+      case me of
+        Nothing -> pure (Right (reverse acc))
+        Just ev@(Y.MarkedEvent e start _)
+          | count >= cap ->
+              pure (Left (withPos (Just (markPos start)) (configError (TooManyNodes (maxNodes lim)))))
+          | depth' > maxDepth lim ->
+              pure (Left (withPos (Just (markPos start)) (configError (DepthExceeded (maxDepth lim)))))
+          | otherwise -> go depth' (count + 1) (ev : acc)
+          where
+            depth' = case e of
+              Y.EventSequenceStart {} -> depth + 1
+              Y.EventMappingStart {} -> depth + 1
+              Y.EventSequenceEnd -> depth - 1
+              Y.EventMappingEnd -> depth - 1
+              _ -> depth
 
 markPos :: Y.YamlMark -> Pos
 markPos m = Pos (Y.yamlLine m + 1) (Y.yamlColumn m + 1)
@@ -170,7 +213,7 @@ node d p = do
         Y.EventMappingStart _ _ anchor -> do
           spendY 1 p at
           depthCheck d p at
-          (m, size, height) <- mappingPairs Map.empty [] 1 0
+          (m, size, height) <- mappingPairs Map.empty [] False 1 0
           let a = Anchored (Value untagged {tagPos = Just at} (Dict m)) size (height + 1)
           remember anchor a
           pure a
@@ -193,9 +236,11 @@ node d p = do
           Anchored v s h <- node (d + 1) (p /# i)
           sequenceItems (i + 1) (v : acc) (size + s) (max height h)
 
-    -- explicit pairs, then merge-key sources (applied underneath)
-    mappingPairs :: Dict -> [Dict] -> Int -> Int -> YP (Dict, Int, Int)
-    mappingPairs acc merges size height = do
+    -- explicit pairs, then merge-key sources (applied underneath). The Bool
+    -- records that a merge key has been seen: a mapping may have only one,
+    -- like any other key.
+    mappingPairs :: Dict -> [Dict] -> Bool -> Int -> Int -> YP (Dict, Int, Int)
+    mappingPairs acc merges seenMerge size height = do
       me <- next
       case me of
         Just (Y.MarkedEvent Y.EventMappingEnd _ _) ->
@@ -204,16 +249,19 @@ node d p = do
           let kat = markPos kstart
           key <- decodeText p kat bytes
           if key == "<<" && style `elem` [Y.Plain, Y.PlainNoTag, Y.Any]
-            then do
-              Anchored v s h <- node (d + 1) (p /. key)
-              srcs <- mergeSources kat v
-              mappingPairs acc (merges ++ srcs) (size + s) (max height (h - 1))
+            then
+              if seenMerge
+                then failY (withPos (Just kat) (atPath (p /. key) (configError (DuplicateKey key))))
+                else do
+                  Anchored v s h <- node (d + 1) (p /. key)
+                  srcs <- mergeSources kat v
+                  mappingPairs acc srcs True (size + s) (max height (h - 1))
             else
               if Map.member key acc
                 then failY (withPos (Just kat) (atPath (p /. key) (configError (DuplicateKey key))))
                 else do
                   Anchored v s h <- node (d + 1) (p /. key)
-                  mappingPairs (Map.insert key v acc) merges (size + s) (max height h)
+                  mappingPairs (Map.insert key v acc) merges seenMerge (size + s) (max height h)
         Just (Y.MarkedEvent _ kstart _) ->
           syntaxAt p (markPos kstart) "only scalar mapping keys are supported"
         Nothing -> failY (atPath p (configError (SyntaxError "unexpected end of YAML input")))
@@ -261,15 +309,13 @@ coreBool t
 coreInt :: Text -> Maybe Number
 coreInt t
   | Just r <- Text.stripPrefix "0x" t, not (Text.null r), Text.all isHexDigit r =
-      Just (Finite (fromInteger (fst (head' (readHex (Text.unpack r))))))
+      Just (Finite (fromInteger (integerFromDigits 16 r)))
   | Just r <- Text.stripPrefix "0o" t, not (Text.null r), Text.all isOctDigit r =
-      Just (Finite (fromInteger (fst (head' (readOct (Text.unpack r))))))
+      Just (Finite (fromInteger (integerFromDigits 8 r)))
   | otherwise =
       let body = maybe t id (Text.stripPrefix "-" t <> Text.stripPrefix "+" t)
       in if not (Text.null body) && Text.all isDigit body then parseNumber t else Nothing
-  where
-    head' (x : _) = x
-    head' [] = (0, "")
+
 
 coreFloat :: Text -> Maybe Number
 coreFloat t

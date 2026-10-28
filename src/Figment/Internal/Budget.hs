@@ -9,7 +9,11 @@ module Figment.Internal.Budget
   , enterContainer
   , throwB
   , askLimits
+  , checkBytes
   ) where
+
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 
 import Figment.Error
 import Figment.Limits
@@ -60,3 +64,9 @@ enterContainer depth p pos = Budget $ \l n ->
   if depth > maxDepth l
     then Left (withPos pos (atPath p (configError (DepthExceeded (maxDepth l)))))
     else Right ((), n)
+
+-- | Reject a source larger than 'maxBytes' before anything is parsed.
+checkBytes :: Limits -> ByteString -> Either ConfigError ()
+checkBytes lim bs
+  | BS.length bs > maxBytes lim = Left (configError (TooManyBytes (maxBytes lim)))
+  | otherwise = Right ()

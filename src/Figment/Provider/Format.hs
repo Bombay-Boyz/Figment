@@ -22,8 +22,10 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TE
-import System.Directory (doesFileExist, getCurrentDirectory, makeAbsolute)
+import System.Directory (doesDirectoryExist, getCurrentDirectory, getFileSize, makeAbsolute)
 import System.FilePath (isRelative, takeDirectory, (</>))
+import System.IO (IOMode (ReadMode), hFileSize, withBinaryFile)
+import System.IO.Error (isPermissionError)
 
 import Figment.Core
 import Figment.Error
@@ -100,19 +102,24 @@ instance Provider Data where
     FromFile p search -> do
       found <- locate search p
       case found of
-        Nothing
+        Left e ->
+          -- the place the file would be could not even be inspected
+          pure (Left (single (withMetadata (Just (baseMetadata d Nothing)) (configError (IoError (Text.pack (show e)))))))
+        Right Nothing
           | dataRequired d ->
               pure (Left (single (withMetadata (Just (baseMetadata d Nothing))
                 (configError (IoError ("file not found: " <> Text.pack p
                   <> (if search && isRelative p then " (searched the working directory and its parents)" else "")))))))
           | otherwise -> pure (Right Map.empty)
-        Just resolved -> do
+        Right (Just resolved) -> do
           let meta = baseMetadata d (Just resolved)
-          r <- try (BS.readFile resolved)
+          r <- try (readBounded (maxBytes lim) resolved)
           case r of
             Left (e :: IOException) ->
               pure (Left (single (withMetadata (Just meta) (configError (IoError (Text.pack (show e)))))))
-            Right bytes -> parseWith meta bytes
+            Right TooBig ->
+              pure (Left (single (withMetadata (Just meta) (configError (TooManyBytes (maxBytes lim))))))
+            Right (Contents bytes) -> parseWith meta bytes
     where
       parseWith meta bytes = do
         parsed <- formatParse (dataFormat d) lim bytes
@@ -121,13 +128,13 @@ instance Provider Data where
           Right v -> case valueNode v of
             Dict top
               | dataNested d -> splitProfiles meta top
-              | otherwise -> Right (Map.singleton (dataProfile d) (fmap (retag meta (dataProfile d)) top))
+              | otherwise -> Right (Map.singleton (dataProfile d) (Map.map (retag meta (dataProfile d)) top))
             n -> Left (single (withMetadata (Just meta) (withPos (tagPos (valueTag v))
                    (configError (InvalidType (describe n) "a dictionary at the top level")))))
 
       splitProfiles meta top =
         let one (k, v) = case valueNode v of
-              Dict d' -> let p = profile k in Right (p, fmap (retag meta p) d')
+              Dict d' -> let p = profile k in Right (p, Map.map (retag meta p) d')
               n -> Left (withMetadata (Just meta) (withPos (tagPos (valueTag v))
                      (atPath (root /. k) (configError (InvalidType (describe n) "a dictionary (nested files map profile names to dictionaries)")))))
             results = map one (Map.toList top)
@@ -137,18 +144,67 @@ instance Provider Data where
 
 -- | Find a file, optionally searching parent directories. Returns an
 -- absolute path.
-locate :: Bool -> FilePath -> IO (Maybe FilePath)
+--
+-- Absence is @Right Nothing@. A failure to even look for the file (for
+-- instance a permission error on the working directory) is a @Left@: an
+-- unreadable location is reported, never mistaken for an absent file that
+-- would silently leave the defaults in force. Only an unreadable
+-- /ancestor/ of the working directory is skipped when searching upwards.
+locate :: Bool -> FilePath -> IO (Either IOException (Maybe FilePath))
 locate search p
-  | search && isRelative p = getCurrentDirectory >>= go
+  | search && isRelative p = getCurrentDirectory >>= first
   | otherwise = do
-      ok <- doesFileExist p
-      if ok then Just <$> makeAbsolute p else pure Nothing
+      r <- probeFile p
+      case r of
+        Left e -> pure (Left e)
+        Right True -> Right . Just <$> makeAbsolute p
+        Right False -> pure (Right Nothing)
   where
-    go dir = do
-      let candidate = dir </> p
-      ok <- doesFileExist candidate
-      if ok
-        then pure (Just candidate)
+    first dir = do
+      r <- probeFile (dir </> p)
+      case r of
+        Left e -> pure (Left e)
+        Right True -> pure (Right (Just (dir </> p)))
+        Right False -> up dir
+    up dir =
+      let parent = takeDirectory dir
+       in if parent == dir
+            then pure (Right Nothing)
+            else do
+              r <- probeFile (parent </> p)
+              case r of
+                Right True -> pure (Right (Just (parent </> p)))
+                _ -> up parent
+
+-- | Is there a regular file (or something that is not a directory) at the
+-- path? Distinguishes "no" from "could not tell because of permissions".
+probeFile :: FilePath -> IO (Either IOException Bool)
+probeFile p = do
+  r <- try (getFileSize p)
+  case r of
+    Right _ -> Right . not <$> doesDirectoryExist p
+    Left e
+      | isPermissionError e -> pure (Left e)
+      | otherwise -> pure (Right False)
+
+data ReadOutcome = Contents !ByteString | TooBig
+
+-- | Read a file, giving up as soon as it is known to exceed @limit@ bytes.
+-- A regular file larger than the limit is never opened for reading; any
+-- other file (a pipe, a device) is read in chunks and abandoned at the
+-- limit, so memory use is bounded by the limit whatever the file claims.
+readBounded :: Int -> FilePath -> IO ReadOutcome
+readBounded limit path = withBinaryFile path ReadMode $ \h -> do
+  size <- try (hFileSize h)
+  case size of
+    Right (n :: Integer) | n > toInteger limit -> pure TooBig
+    Right _ -> loop h 0 []
+    Left (_ :: IOException) -> loop h 0 []
+  where
+    loop h !total acc = do
+      chunk <- BS.hGetSome h 65536
+      if BS.null chunk
+        then pure (Contents (BS.concat (reverse acc)))
         else
-          let parent = takeDirectory dir
-          in if parent == dir then pure Nothing else go parent
+          let total' = total + BS.length chunk
+           in if total' > limit then pure TooBig else loop h total' (chunk : acc)

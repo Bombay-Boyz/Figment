@@ -28,6 +28,7 @@ module Figment.Provider.Cli
   , Arg (..)
   ) where
 
+import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -36,6 +37,7 @@ import System.Environment (getArgs)
 import Figment.Core
 import Figment.Error
 import Figment.Internal.Nest
+import Figment.Internal.Text (isUndecodable)
 import Figment.Internal.ValueParser (parseValue)
 import Figment.Limits
 import Figment.Metadata
@@ -49,15 +51,22 @@ data Cli = Cli
   , cliKeyMap :: Text -> Text
   , cliParsed :: Bool
   , cliProfile :: Profile
+  , cliInvalid :: [Int]
+    -- ^ positions (from 1) of arguments that are not valid UTF-8
   }
 
 -- | A CLI provider over the given arguments.
 cli :: [Text] -> Cli
-cli args = Cli args (Text.replace "-" "_") True Default
+cli args = Cli args (Text.replace "-" "_") True Default []
 
 -- | The arguments of the running process.
 cliFromProcess :: IO Cli
-cliFromProcess = cli . map Text.pack <$> getArgs
+cliFromProcess = do
+  raw <- getArgs
+  -- bytes that are not valid UTF-8 arrive as U+DC80..U+DCFF, which
+  -- 'Text.pack' would silently replace; remember them so they are reported
+  let invalid = [i | (i, a) <- zip [1 ..] raw, any isUndecodable a]
+  pure (cli (map Text.pack raw)) {cliInvalid = invalid}
 
 -- | How each key segment is mapped (default: dashes to underscores).
 keyMap :: (Text -> Text) -> Cli -> Cli
@@ -109,20 +118,29 @@ instance Provider Cli where
       named "command-line arguments"
   provide lim c = pure $
     let args = parseArgs c
-        malformed = [ atPath root (configError (SyntaxError ("malformed option `" <> a <> "`"))) | Malformed a <- args ]
+        -- messages name an option, never echo its value (it may be a secret)
+        malformed = [ atPath root (configError (SyntaxError ("malformed option `" <> argName a <> "`"))) | Malformed a <- args ]
+        invalid = [ atPath root (configError (SyntaxError ("command-line argument " <> Text.pack (show i) <> " is not valid UTF-8 (or the process locale is not a UTF-8 locale)"))) | i <- cliInvalid c ]
         entries = concatMap (entry lim c) args
-        failures = malformed ++ [e | Left e <- entries]
+        failures = malformed ++ invalid ++ [e | Left e <- entries]
     in case fromErrorList failures of
          Just es -> Left es
          Nothing -> Map.singleton (cliProfile c) <$> nest LastWins [x | Right x <- entries]
 
+-- | The option as the user typed it, without any @=value@: what error
+-- messages call the argument.
+argName :: Text -> Text
+argName = Text.takeWhile (/= '=')
+
 entry :: Limits -> Cli -> Arg -> [Either ConfigError (Text, [Text], Value)]
 entry lim c = \case
   Option a segs (Just v)
-    | cliParsed c -> [(a, segs, ) <$> parseValue lim v]
-    | otherwise -> [Right (a, segs, Value untagged {tagRaw = Just v} (String v))]
-  Option a segs Nothing -> [Right (a, segs, flag True)]
-  NegatedFlag a segs -> [Right (a, segs, flag False)]
+    | cliParsed c -> [(argName a, segs, ) <$> first (at segs) (parseValue lim v)]
+    | otherwise -> [Right (argName a, segs, Value untagged {tagRaw = Just v} (String v))]
+  Option a segs Nothing -> [Right (argName a, segs, flag True)]
+  NegatedFlag a segs -> [Right (argName a, segs, flag False)]
   _ -> []
   where
     flag b = Value untagged {tagRaw = Just (if b then "true" else "false")} (Bool b)
+    -- errors about one option are located at its key
+    at segs = atPath (fromSegments (map Key segs))
