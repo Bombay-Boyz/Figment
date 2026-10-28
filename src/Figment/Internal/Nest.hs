@@ -31,7 +31,7 @@ nest policy entries =
   let (tree, errs) = foldl' step (Map.empty, []) entries
   in case fromErrorList (reverse errs) of
        Just es -> Left es
-       Nothing -> Right (fmap toValue tree)
+       Nothing -> Right (Map.map toValue tree)
   where
     step (tree, errs) (name, ks, v) = case insert root name ks v tree of
       Left e -> (tree, e : errs)
@@ -57,4 +57,4 @@ nest policy entries =
         Left (atPath (path /. k) (configError (KeyConflict other name)))
 
     toValue (Leaf _ v) = v
-    toValue (Branch _ m) = mkValue (Dict (fmap toValue m))
+    toValue (Branch _ m) = mkValue (Dict (Map.map toValue m))

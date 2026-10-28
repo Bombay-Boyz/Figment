@@ -20,13 +20,15 @@ module Figment.Path
   ) where
 
 import Control.DeepSeq (NFData)
-import Data.Char (isAlphaNum, isDigit)
+import Data.Char (chr, digitToInt, isAlphaNum, isDigit, isHexDigit)
 import Data.Foldable (toList)
 import Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
+
+import Figment.Internal.Text (escapeChar, needsEscape)
 
 -- | One step into a configuration tree.
 data Segment
@@ -87,7 +89,9 @@ keyPath t = fromSegments (map Key (Text.splitOn "." t))
 
 -- | Render a path: keys joined with @.@, indices as @[n]@, and keys that
 -- are not plain identifiers double-quoted. The root renders as the empty
--- text. @parsePath . renderPath == Right@.
+-- text. Control characters inside quoted keys are written as escapes
+-- (@\\n@, @\\r@, @\\t@, @\\u{hex}@), so a rendered path is always a single
+-- printable line. @parsePath . renderPath == Right@.
 renderPath :: Path -> Text
 renderPath (Path s) = go True (toList s)
   where
@@ -109,7 +113,9 @@ renderKey k
     plain c = isAlphaNum c || c == '_' || c == '-'
     esc '"' = "\\\""
     esc '\\' = "\\\\"
-    esc c = Text.singleton c
+    esc c
+      | needsEscape c = escapeChar c
+      | otherwise = Text.singleton c
 
 -- | Parse the syntax produced by 'renderPath'.
 parsePath :: Text -> Either Text Path
@@ -129,14 +135,13 @@ parsePath t0
       Just ('[', rest) -> do
         let (ds, rest') = Text.span isDigit rest
         case Text.uncons rest' of
-          Just (']', rest'') | not (Text.null ds) ->
-            more (Index (read (Text.unpack ds)) : acc) rest''
+          Just (']', rest'') | Just i <- parseIndex ds -> more (Index i : acc) rest''
           _ -> Left ("malformed index in path " <> quoted t0)
       Just (c, _) -> Left ("unexpected " <> Text.pack (show c) <> " in path " <> quoted t0)
 
     keySeg t = case Text.uncons t of
       Just ('[', _) -> idxFirst t
-      Just ('"', rest) -> quotedKey "" rest
+      Just ('"', rest) -> quotedKey [] rest
       _ ->
         let (k, rest) = Text.span (\c -> c /= '.' && c /= '[') t
         in if Text.null k
@@ -147,16 +152,53 @@ parsePath t0
       Just ('[', rest) ->
         let (ds, rest') = Text.span isDigit rest
         in case Text.uncons rest' of
-             Just (']', rest'') | not (Text.null ds) -> Right (Index (read (Text.unpack ds)), rest'')
+             Just (']', rest'') | Just i <- parseIndex ds -> Right (Index i, rest'')
              _ -> Left ("malformed index in path " <> quoted t0)
       _ -> Left ("malformed path " <> quoted t0)
 
-    quotedKey acc t = case Text.uncons t of
-      Nothing -> Left ("unterminated quoted key in path " <> quoted t0)
-      Just ('"', rest) -> Right (Key acc, rest)
-      Just ('\\', rest) -> case Text.uncons rest of
-        Just (c, rest') -> quotedKey (Text.snoc acc c) rest'
-        Nothing -> Left ("dangling escape in path " <> quoted t0)
-      Just (c, rest) -> quotedKey (Text.snoc acc c) rest
+    -- linear in the length of the key: runs without escapes are sliced, not
+    -- copied character by character
+    quotedKey acc t =
+      let (chunk, rest) = Text.break (\c -> c == '"' || c == '\\') t
+       in case Text.uncons rest of
+            Nothing -> Left ("unterminated quoted key in path " <> quoted t0)
+            Just ('"', rest') -> Right (Key (Text.concat (reverse (chunk : acc))), rest')
+            Just (_, rest') -> case Text.uncons rest' of
+              Nothing -> Left ("dangling escape in path " <> quoted t0)
+              Just ('n', r) -> quotedKey ("\n" : chunk : acc) r
+              Just ('r', r) -> quotedKey ("\r" : chunk : acc) r
+              Just ('t', r) -> quotedKey ("\t" : chunk : acc) r
+              Just ('u', r) -> case unicodeEscape r of
+                Just (ch, r') -> quotedKey (Text.singleton ch : chunk : acc) r'
+                Nothing -> Left ("malformed \\u{...} escape in path " <> quoted t0)
+              Just (c, r) -> quotedKey (Text.singleton c : chunk : acc) r
 
     quoted x = "`" <> x <> "`"
+
+-- | A non-negative array index that fits an 'Int'. Longer digit strings are
+-- rejected instead of silently wrapping around (as @read@ would).
+parseIndex :: Text -> Maybe Int
+parseIndex ds
+  | Text.null ds = Nothing
+  | Text.compareLength ds 19 == GT = Nothing
+  | n > toInteger (maxBound :: Int) = Nothing
+  | otherwise = Just (fromInteger n)
+  where
+    n = Text.foldl' (\acc c -> acc * 10 + toInteger (digitToInt c)) 0 ds
+
+-- | The @{hex}@ part of a @\\u{hex}@ escape: one to six hex digits naming a
+-- Unicode scalar value.
+unicodeEscape :: Text -> Maybe (Char, Text)
+unicodeEscape r = case Text.uncons r of
+  Just ('{', r1) ->
+    let (hex, r2) = Text.span isHexDigit r1
+        v = Text.foldl' (\acc c -> acc * 16 + digitToInt c) 0 hex
+     in case Text.uncons r2 of
+          Just ('}', r3)
+            | not (Text.null hex)
+            , Text.compareLength hex 6 /= GT
+            , v <= 0x10FFFF
+            , v < 0xD800 || v > 0xDFFF ->
+                Just (chr v, r3)
+          _ -> Nothing
+  _ -> Nothing

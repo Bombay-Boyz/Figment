@@ -39,12 +39,15 @@ module Figment.Core
   , focus
   ) where
 
-import Control.Exception (SomeAsyncException, SomeException (..), displayException, fromException, throwIO, try)
+import Control.DeepSeq (force)
+import Control.Exception (SomeAsyncException, SomeException (..), displayException, evaluate, fromException, throwIO, try)
 import Data.Foldable (toList)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
 import Data.Monoid (Last (..))
+import Data.Semigroup (sconcat)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import qualified Data.Text as Text
@@ -168,7 +171,14 @@ data Loaded = Loaded
     -- ^ every provider, in order
   , loadedLimits :: !Limits
     -- ^ the limits the sources were read with
+  , loadedView :: Value
+    -- ^ the merged view of the selected profile (see 'selected'); computed
+    -- once, on first use, instead of on every query
   }
+
+-- | The only way to build a 'Loaded': derives the cached view.
+mkLoaded :: Profile -> Map Profile Dict -> [Metadata] -> Limits -> Loaded
+mkLoaded prof dat srcs lim = Loaded prof dat srcs lim (selectView prof dat)
 
 -- | Run every provider, in order. Failures do not stop the load: all of
 -- them are collected and reported together.
@@ -182,13 +192,23 @@ load fig = do
       combined = foldl' (\acc (s, d) -> coalesceData (stepOrder s) acc (retagData (stepMeta s) d)) Map.empty oks
       hinted = foldl' (\acc s -> maybe acc (coalesceProfile (stepOrder s) acc) (stepProfile s)) Default steps
       chosen = fromMaybe hinted (getLast (figSelect fig))
-  pure $ case errs of
-    (e : es) -> Left (foldl' (<>) e es)
-    [] -> Right (Loaded chosen combined (map stepMeta steps) lim)
+  case errs of
+    (e : es) -> pure (Left (sconcat (e :| es)))
+    [] -> do
+      -- Evaluate everything now: a loaded configuration holds no thunks
+      -- (so nothing keeps a source's original tree alive) and nothing can
+      -- throw later, outside this function.
+      evaluated <- evaluate (force combined)
+      let !loaded = mkLoaded chosen evaluated (map stepMeta steps) lim
+      pure (Right loaded)
 
+-- | Run one provider. Its result is evaluated /inside/ the exception
+-- handler: providers commonly return lazily built values (@pure (parse x)@),
+-- and an exception hidden in such a value must become an error here, not
+-- escape later from whoever first inspects the configuration.
 runStep :: Limits -> Step -> IO (Either ConfigErrors (Map Profile Dict))
 runStep lim s = do
-  r <- try (stepRun s lim)
+  r <- try (stepRun s lim >>= evaluate . force)
   case r of
     Right (Left es) -> pure (Left (fmap' es))
     Right ok -> pure ok
@@ -207,19 +227,24 @@ bare :: SomeException -> String
 bare (SomeException e) = displayException e
 
 retagData :: Metadata -> Map Profile Dict -> Map Profile Dict
-retagData m = Map.mapWithKey (\p d -> fmap (retag m p) d)
+retagData m = Map.mapWithKey (\p d -> Map.map (retag m p) d)
 
 instance Provider Figment where
   metadata _ = named "Figment"
-  provide _ fig = fmap loadedData <$> load fig
+  -- A nested figment that sets no limits of its own is read with the
+  -- limits of the figment that contains it, so tightening the outer limits
+  -- also constrains every figment nested inside it.
+  provide lim fig = fmap loadedData <$> load fig {figLimitsOpt = Last (Just (fromMaybe lim (getLast (figLimitsOpt fig))))}
   providerProfile = getLast . figSelect
 
 -- | The configuration of the selected profile: 'Default', then the
 -- selected profile, then 'Global', each merged over the previous.
 selected :: Loaded -> Value
-selected l =
-  let get p = Map.findWithDefault Map.empty p (loadedData l)
-      prof = loadedProfile l
+selected = loadedView
+
+selectView :: Profile -> Map Profile Dict -> Value
+selectView prof dat =
+  let get p = Map.findWithDefault Map.empty p dat
       base = get Default
       withSel = if prof == Default || prof == Global then base else coalesceDict Merge base (get prof)
       final = coalesceDict Merge withSel (get Global)
@@ -227,7 +252,7 @@ selected l =
 
 -- | Choose another profile without re-reading any source.
 reselect :: Profile -> Loaded -> Loaded
-reselect p l = l {loadedProfile = p}
+reselect p l = mkLoaded p (loadedData l) (loadedSources l) (loadedLimits l)
 
 -- | Every profile with data.
 profiles :: Loaded -> [Profile]
@@ -248,7 +273,7 @@ findMetadata p l = findValue p l >>= tagMeta . valueTag
 -- | Re-root every profile at the given key path (Rust: @focus@).
 -- Profiles in which the path is absent or not a dictionary become empty.
 focus :: Path -> Loaded -> Loaded
-focus p l = l {loadedData = Map.mapMaybe sub (loadedData l)}
+focus p l = mkLoaded (loadedProfile l) (Map.mapMaybe sub (loadedData l)) (loadedSources l) (loadedLimits l)
   where
     sub d = case lookupPath p (mkValue (Dict d)) of
       Just (Value _ (Dict d')) -> Just d'

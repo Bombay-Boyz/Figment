@@ -29,11 +29,13 @@ json = Format "JSON" (\lim bs -> pure (parseJson lim bs))
 
 -- | Parse a JSON document, enforcing the limits.
 parseJson :: Limits -> ByteString -> Either ConfigError Value
-parseJson lim bs = runBudget lim $ do
-  (v, rest) <- value 1 root (Tok.bsToTokens bs)
-  if BC.all (`elem` (" \t\r\n" :: String)) rest
-    then pure v
-    else throwB (configError (SyntaxError "unexpected characters after the JSON value"))
+parseJson lim bs = checkBytes lim bs *> runBudget lim parse
+  where
+    parse = do
+      (v, rest) <- value 1 root (Tok.bsToTokens bs)
+      if BC.all (`elem` (" \t\r\n" :: String)) rest
+        then pure v
+        else throwB (configError (SyntaxError "unexpected characters after the JSON value"))
 
 syntax :: Path -> String -> Budget a
 syntax p e = throwB (atPath p (configError (SyntaxError (Text.pack e))))

@@ -160,9 +160,12 @@ module Figment
     -- * Limits
   , Limits
   , mkLimits
+  , withMaxBytes
   , defaultLimits
+  , defaultMaxBytes
   , maxDepth
   , maxNodes
+  , maxBytes
   ) where
 
 import Data.Functor.Identity (Identity (..))

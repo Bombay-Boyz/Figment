@@ -47,7 +47,8 @@ tests =
     , testCase "structural conflicts are errors" $ do
         r <- loadCli ["--db=x", "--db.host=y"]
         case r of
-          Left es -> map errorKind (errorList es) @?= [KeyConflict "--db=x" "--db.host=y"]
+          -- conflicts name the options, never their values (which may be secrets)
+          Left es -> map errorKind (errorList es) @?= [KeyConflict "--db" "--db.host"]
           Right _ -> assertFailure "expected a conflict"
     , testCase "keys are not lower-cased" $ do
         l <- ok ["--Name=x"]

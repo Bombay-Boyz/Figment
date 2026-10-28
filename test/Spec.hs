@@ -8,6 +8,7 @@ import qualified Figment.Test.Decode as Decode
 import qualified Figment.Test.Env as Env
 import qualified Figment.Test.Errors as Errors
 import qualified Figment.Test.Figment as Figment
+import qualified Figment.Test.Hardening as Hardening
 import qualified Figment.Test.MergeLaws as MergeLaws
 import qualified Figment.Test.Partial as Partial
 import qualified Figment.Test.Providers as Providers
@@ -28,6 +29,7 @@ main =
       , Cli.tests
       , Errors.tests
       , Adversarial.tests
+      , Hardening.tests
       , Readme.tests
       , Tutorial.tests
       ]

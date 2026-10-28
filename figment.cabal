@@ -87,6 +87,9 @@ library
   other-modules:
     Figment.Internal.Budget
     Figment.Internal.Nest
+    Figment.Internal.Number
+    Figment.Internal.Text
+    Figment.Internal.TomlScan
     Figment.Internal.ValueParser
   build-depends:
       base        >= 4.20   && < 4.22
@@ -121,6 +124,7 @@ test-suite figment-test
     Figment.Test.Cli
     Figment.Test.Errors
     Figment.Test.Adversarial
+    Figment.Test.Hardening
     Figment.Test.Readme
     Figment.Test.Tutorial
   build-depends:
@@ -153,4 +157,4 @@ benchmark figment-bench
     , criterion  >= 1.6 && < 1.7
     , deepseq
     , text
-  ghc-options:      -threaded -rtsopts
+  ghc-options:      -threaded -rtsopts "-with-rtsopts=-T"

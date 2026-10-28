@@ -52,17 +52,20 @@ module Figment.Decode
     -- * Internals shared with "Figment.Partial"
   , missingFieldError
   , suggest
+  , suggestAt
   ) where
 
-import Data.Char (isUpper, toLower)
+import Data.Char (isDigit, isLower, isUpper, toLower)
 import Data.Int (Int16, Int32, Int64, Int8)
 import Data.Kind (Type)
+import Data.List (sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
-import qualified Data.Map.Lazy as LMap
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy (..))
+import Data.Semigroup (sconcat)
 import Data.Scientific (Scientific)
 import qualified Data.Scientific as Sci
 import Data.Sequence (Seq)
@@ -75,6 +78,7 @@ import Data.Time (Day, LocalTime, TimeOfDay, UTCTime, ZonedTime, zonedTimeToUTC)
 import Data.Time.Format.ISO8601 (ISO8601, iso8601ParseM)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
+import qualified Data.Vector.Unboxed as U
 import Data.Word (Word16, Word32, Word64, Word8)
 import GHC.Generics
 import GHC.TypeLits (ErrorMessage (..), TypeError)
@@ -243,10 +247,10 @@ missingFieldError c name =
       prof = ctxProfile c
       ways = [ "`" <> interpolate m prof p <> "` in " <> metaName m <> maybe "" ((" " <>) . renderSource) (metaSource m)
              | m <- ctxSources c ]
-      hint = case ways of
-        [] -> []
-        [w] -> ["no source sets it; it can be set as " <> w]
-        _ -> ["no source sets it; it can be set as " <> Text.intercalate ", " (init ways) <> ", or " <> last ways]
+      hint = case NE.nonEmpty ways of
+        Nothing -> []
+        Just (w :| []) -> ["no source sets it; it can be set as " <> w]
+        Just ws -> ["no source sets it; it can be set as " <> Text.intercalate ", " (NE.init ws) <> ", or " <> NE.last ws]
   in ConfigError (MissingField name) p (Just prof) Nothing Nothing hint
 
 ------------------------------------------------------------------------
@@ -320,14 +324,35 @@ decodeIntegral conv = Decoder $ \c v -> case unDecoder (numberD "an integer") c 
 
 unboundedInteger :: Decoder Integer
 unboundedInteger = decodeIntegral $ \s ->
-  if Sci.base10Exponent s > 4096
+  if tooManyDigits s
     then Left "an integer with at most ~4096 digits"
     else Right (truncate s)
+
+-- | Does the integral value have more than about 4096 decimal digits?
+-- Checks the coefficient as well as the exponent, so a long literal such
+-- as a megabyte of digits is rejected like @1e5000@ is.
+tooManyDigits :: Scientific -> Bool
+tooManyDigits s =
+  e > 4096
+    || abs c >= digitsLimit
+    || (e > 0 && abs c * 10 ^ e >= digitsLimit)
+  where
+    e = Sci.base10Exponent s
+    c = Sci.coefficient s
+
+digitsLimit :: Integer
+digitsLimit = 10 ^ (4096 :: Int)
 
 realFloatD :: RealFloat a => Decoder a
 realFloatD = Decoder $ \c v -> case unDecoder (numberD "a number") c v of
   Failure e -> Failure e
-  Success (Finite s) -> Success (Sci.toRealFloat s)
+  Success (Finite s)
+    -- a finite literal that overflows the target type is an error, not a
+    -- silent infinity
+    | isInfinite x -> valueError c v "a number within the range of the type"
+    | otherwise -> Success x
+    where
+      x = Sci.toRealFloat s
   Success PosInfinity -> Success (1 / 0)
   Success NegInfinity -> Success (-1 / 0)
   Success NaN -> Success (0 / 0)
@@ -338,8 +363,9 @@ instance FromConfig Text where fromConfig = textual
 
 instance FromConfig Char where
   fromConfig = Decoder $ \c v -> case unDecoder textual c v of
-    Success t | Text.length t == 1 -> Success (Text.head t)
-    Success _ -> valueError c v "a single character"
+    Success t
+      | Just (ch, rest) <- Text.uncons t, Text.null rest -> Success ch
+      | otherwise -> valueError c v "a single character"
     Failure e -> Failure e
   listDecoder = Text.unpack <$> textual
 
@@ -535,13 +561,27 @@ snakeCase = separate '_'
 kebabCase :: String -> String
 kebabCase = separate '-'
 
+-- | Insert the separator at word boundaries: before an uppercase letter
+-- that follows a lowercase letter or digit, and before the last capital of
+-- an acronym that is followed by a lowercase letter. @dbURL@ becomes
+-- @db_url@, @HTTPServer@ becomes @http_server@, @useHTTPS@ becomes
+-- @use_https@.
 separate :: Char -> String -> String
-separate sep = go True
+separate sep = go Nothing
   where
     go _ [] = []
-    go start (c : cs)
-      | isUpper c = (if start then [] else [sep]) ++ toLower c : go False cs
-      | otherwise = c : go False cs
+    go prev (c : cs)
+      | isUpper c = [sep | boundary] ++ toLower c : go (Just c) cs
+      | otherwise = c : go (Just c) cs
+      where
+        boundary = case prev of
+          Nothing -> False
+          Just p
+            | isLower p || isDigit p -> True
+            | isUpper p -> case cs of
+                (n : _) -> isLower n
+                [] -> False
+            | otherwise -> False
 
 -- | Derive a decoder from a 'Generic' instance: records are dictionaries, enums are strings (matched case-insensitively), other sums are externally tagged (@{ Variant = payload }@), newtypes unwrap, positional constructors are arrays.
 genericDecoder :: (Generic a, GDecode (Rep a)) => Options -> Decoder a
@@ -631,51 +671,86 @@ decodeCtors' cs = Decoder $ \c v ->
 recordD :: Options -> [Text] -> (DecodeContext -> Dict -> Result a) -> Decoder a
 recordD o known fields = Decoder $ \c v -> case valueNode v of
   Dict m ->
-    let unknownErrs =
-          [ errorAt c {ctxPath = ctxPath c /. k} x (UnknownField k (suggest k known))
-          | rejectUnknownFields o
-          , (k, x) <- Map.toList m
-          , k `notElem` known
+    let knownSet = Set.fromList known
+        unknown = [kv | rejectUnknownFields o, kv@(k, _) <- Map.toList m, not (k `Set.member` knownSet)]
+        unknownErrs =
+          [ errorAt c {ctxPath = ctxPath c /. k} x (UnknownField k (suggestAt i k known))
+          | (i, (k, x)) <- zip [0 ..] unknown
           ]
-        unknownR = case unknownErrs of
-          [] -> Success ()
-          (e : es) -> Failure (foldl (<>) e es)
-    in unknownR *> fields c m
+        unknownR = case NE.nonEmpty unknownErrs of
+          Nothing -> Success ()
+          Just es -> Failure (sconcat es)
+     in unknownR *> fields c m
   _ -> typeError c v "a dictionary"
 
 -- | Candidates within a small edit distance, best first.
+--
+-- Suggestions are a courtesy, so their cost is bounded: keys longer than
+-- 'maxSuggestLength' get none, and candidates whose length differs too much
+-- to be within range are skipped without computing a distance.
 suggest :: Text -> [Text] -> [Text]
-suggest k known =
-  let scored = mapMaybe (\cand -> let d = editDistance (Text.unpack k) (Text.unpack cand)
-                                  in if d <= max 1 (Text.length cand `div` 3) then Just (d, cand) else Nothing) known
-  in map snd (take 3 (sortOn' fst scored))
+suggest k known
+  | Text.compareLength k maxSuggestLength == GT = []
+  | otherwise = map snd (take 3 (sortOn fst scored))
   where
-    sortOn' f = foldr ins []
-      where ins x [] = [x]
-            ins x (y : ys) | f x <= f y = x : y : ys
-                           | otherwise = y : ins x ys
+    lk = Text.length k
+    scored =
+      [ (d, cand)
+      | cand <- known
+      , let lc = Text.length cand
+            limit = max 1 (lc `div` 3)
+      , abs (lk - lc) <= limit -- the distance is at least the length difference
+      , let d = editDistance k cand
+      , d <= limit
+      ]
+
+-- | 'suggest' for the @i@th unknown key of a record (counting from 0). Only
+-- the first 'suggestionBudget' unknown keys receive suggestions, so a
+-- document full of typos costs a bounded amount of work to report.
+suggestAt :: Int -> Text -> [Text] -> [Text]
+suggestAt i k known
+  | i >= suggestionBudget = []
+  | otherwise = suggest k known
+
+-- | Longest key (in characters) that is compared against field names.
+maxSuggestLength :: Int
+maxSuggestLength = 64
+
+-- | How many unknown keys per record are given suggestions.
+suggestionBudget :: Int
+suggestionBudget = 32
 
 -- | Optimal string alignment distance (Levenshtein plus adjacent
--- transpositions, so @hots@ is one edit from @host@).
-editDistance :: String -> String -> Int
-editDistance a b = table LMap.! (la, lb)
+-- transpositions, so @hots@ is one edit from @host@). Runs in
+-- O(length a * length b) time and O(length b) space: one unboxed row at a
+-- time, never the whole table.
+editDistance :: Text -> Text -> Int
+editDistance a b
+  | la == 0 = lb
+  | lb == 0 = la
+  | otherwise = U.last (snd (foldl' step (row0, row0) [1 .. la]))
   where
-    la = length a
-    lb = length b
-    av = Vector.fromList a
-    bv = Vector.fromList b
-    table = LMap.fromList [((i, j), cell i j) | i <- [0 .. la], j <- [0 .. lb]]
-    get i j = table LMap.! (i, j)
-    cell i 0 = i
-    cell 0 j = j
-    cell i j =
-      let ca = av Vector.! (i - 1)
-          cb = bv Vector.! (j - 1)
-          cost = if ca == cb then 0 else 1
-          base = minimum [get (i - 1) j + 1, get i (j - 1) + 1, get (i - 1) (j - 1) + cost]
-      in if i > 1 && j > 1 && ca == bv Vector.! (j - 2) && av Vector.! (i - 2) == cb
-           then min base (get (i - 2) (j - 2) + 1)
-           else base
+    av = U.fromList (Text.unpack a) :: U.Vector Char
+    bv = U.fromList (Text.unpack b) :: U.Vector Char
+    la = U.length av
+    lb = U.length bv
+    row0 = U.enumFromN 0 (lb + 1) :: U.Vector Int
+
+    -- (row i-2, row i-1) -> (row i-1, row i)
+    step (!prev2, !prev1) i = (prev1, cur)
+      where
+        ca = av U.! (i - 1)
+        cur = U.constructN (lb + 1) cell
+        cell built
+          | j == 0 = i
+          | i > 1 && j > 1 && ca == bv U.! (j - 2) && av U.! (i - 2) == cb =
+              min base (prev2 U.! (j - 2) + 1)
+          | otherwise = base
+          where
+            j = U.length built
+            cb = bv U.! (j - 1)
+            cost = if ca == cb then 0 else 1
+            base = minimum [prev1 U.! j + 1, built U.! (j - 1) + 1, prev1 U.! (j - 1) + cost]
 
 class GFields (f :: Type -> Type) where
   gfields :: Options -> DecodeContext -> Dict -> Result (f x)

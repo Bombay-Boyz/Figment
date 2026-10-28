@@ -37,6 +37,8 @@ import Data.Kind (Type)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
+import Data.Semigroup (sconcat)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics
@@ -210,12 +212,15 @@ runDecoderIn = decodeWith
 -- | Unknown-field check, accumulated together with the field results.
 recordCheck :: Options -> [Text] -> DecodeContext -> Dict -> Result a -> Result a
 recordCheck o known c m fields =
-  let unknown =
-        [ single (atValue c {ctxPath = ctxPath c /. key} x (UnknownField key (suggest key known)))
-        | rejectUnknownFields o, (key, x) <- Map.toList m, key `notElem` known ]
-  in case unknown of
-       [] -> fields
-       (e : es) -> Failure (foldl (<>) e es) <* fields
+  let knownSet = Set.fromList known
+      unknown = [kv | rejectUnknownFields o, kv@(key, _) <- Map.toList m, not (key `Set.member` knownSet)]
+      errs =
+        [ single (atValue c {ctxPath = ctxPath c /. key} x (UnknownField key (suggestAt i key known)))
+        | (i, (key, x)) <- zip [0 ..] unknown
+        ]
+   in case NE.nonEmpty errs of
+        Nothing -> fields
+        Just es -> Failure (sconcat es) <* fields
 
 atValue :: DecodeContext -> Value -> ErrorKind -> ConfigError
 atValue c x kind =

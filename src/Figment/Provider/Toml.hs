@@ -19,6 +19,7 @@ import qualified Toml.Syntax as T
 
 import Figment.Error
 import Figment.Internal.Budget
+import Figment.Internal.TomlScan (bracketOverflow)
 import Figment.Limits
 import Figment.Metadata (Pos (..))
 import Figment.Path
@@ -32,9 +33,17 @@ toml = Format "TOML" (\lim bs -> pure (parseToml lim bs))
 -- | Parse a TOML document, enforcing the limits.
 parseToml :: Limits -> ByteString -> Either ConfigError Value
 parseToml lim bs = do
+  checkBytes lim bs
   txt <- case TE.decodeUtf8' bs of
     Left e -> Left (configError (SyntaxError ("invalid UTF-8: " <> Text.pack (show e))))
     Right t -> Right t
+  -- toml-parser builds its whole syntax tree before figment sees a single
+  -- value, so a pathologically nested document is rejected here, by one
+  -- linear pass, before the parser is asked to build it. Table headers
+  -- count as brackets while open, hence the allowance of two.
+  case bracketOverflow (if maxDepth lim >= maxBound - 2 then maxBound else maxDepth lim + 2) txt of
+    Just at -> Left (withPos (Just at) (configError (DepthExceeded (maxDepth lim))))
+    Nothing -> Right ()
   exprs <- case T.parseRawToml txt of
     Left (T.Located p msg) -> Left (withPos (Just (pos p)) (configError (SyntaxError (Text.pack msg))))
     Right es -> Right es

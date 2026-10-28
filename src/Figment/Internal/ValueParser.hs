@@ -27,6 +27,7 @@ import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 
 import Figment.Error
+import Figment.Internal.Number (integerFromDigits)
 import Figment.Limits
 import Figment.Value
 
@@ -41,15 +42,15 @@ parseValue lim raw = case top of
   where
     trimmed = Text.strip raw
     rawTagged n = Value untagged {tagRaw = Just raw} n
-    top
-      | Text.null trimmed = Right (String raw)
-      | otherwise = case Text.head trimmed of
-          c | c == '[' || c == '{' || c == '"' || c == '\'' ->
-                case structured lim 1 trimmed of
-                  Right (v, rest) | Text.null (Text.strip rest) -> Right (valueNode v)
-                  Right _ -> Left NoParse
-                  Left e -> Left e
-          _ -> Right (scalarNode raw trimmed)
+    top = case Text.uncons trimmed of
+      Nothing -> Right (String raw)
+      Just (c, _)
+        | c == '[' || c == '{' || c == '"' || c == '\'' ->
+            case structured lim 1 trimmed of
+              Right (v, rest) | Text.null (Text.strip rest) -> Right (valueNode v)
+              Right _ -> Left NoParse
+              Left e -> Left e
+        | otherwise -> Right (scalarNode raw trimmed)
 
 data Failure = NoParse | Limit ConfigError
 
@@ -73,7 +74,7 @@ structured lim depth t0 = case Text.uncons t of
     guardDepth
     (kvs, rest') <- pairs rest
     pure (mkValue (Dict (Map.fromList kvs)), rest')
-  Just ('"', rest) -> first' string (quotedDouble "" rest)
+  Just ('"', rest) -> first' string (quotedDouble [] rest)
   Just ('\'', rest) -> first' string (quotedSingle rest)
   Just _ ->
     let (tok, rest) = Text.break (`elem` (",]}" :: String)) t
@@ -129,7 +130,7 @@ structured lim depth t0 = case Text.uncons t of
             _ -> Left NoParse
 
     key s = case Text.uncons (Text.stripStart s) of
-      Just ('"', rest) -> quotedDouble "" rest
+      Just ('"', rest) -> quotedDouble [] rest
       Just ('\'', rest) -> quotedSingle rest
       _ ->
         let (k, rest) = Text.span (\c -> not (isSpace c) && c `notElem` ("=:,{}[]" :: String)) (Text.stripStart s)
@@ -137,18 +138,24 @@ structured lim depth t0 = case Text.uncons t of
 
     first' f r = fmap (\(a, rest) -> (f a, rest)) r
 
-quotedDouble :: Text -> Text -> P Text
-quotedDouble acc s = case Text.uncons s of
-  Nothing -> Left NoParse
-  Just ('"', rest) -> Right (acc, rest)
-  Just ('\\', rest) -> case Text.uncons rest of
-    Just (c, rest') -> case c of
-      'n' -> quotedDouble (Text.snoc acc '\n') rest'
-      't' -> quotedDouble (Text.snoc acc '\t') rest'
-      'r' -> quotedDouble (Text.snoc acc '\r') rest'
-      _ -> quotedDouble (Text.snoc acc c) rest'
-    Nothing -> Left NoParse
-  Just (c, rest) -> quotedDouble (Text.snoc acc c) rest
+-- | The body of a double-quoted string, after the opening quote. Runs
+-- without escapes are sliced, not appended character by character: the
+-- accumulator is a list of chunks, so the whole parse is linear in the
+-- length of the input.
+quotedDouble :: [Text] -> Text -> P Text
+quotedDouble acc s =
+  let (chunk, rest) = Text.break (\c -> c == '"' || c == '\\') s
+   in case Text.uncons rest of
+        Just ('"', rest') -> Right (Text.concat (reverse (chunk : acc)), rest')
+        Just (_, rest') -> case Text.uncons rest' of -- a backslash
+          Just (c, rest'') -> quotedDouble (escaped c : chunk : acc) rest''
+          Nothing -> Left NoParse
+        Nothing -> Left NoParse
+  where
+    escaped 'n' = "\n"
+    escaped 't' = "\t"
+    escaped 'r' = "\r"
+    escaped c = Text.singleton c
 
 quotedSingle :: Text -> P Text
 quotedSingle s =
@@ -188,8 +195,8 @@ parseNumber t = case t of
               _ -> (1, r)
         in if Text.null ds || not (Text.all isDigit ds) || Text.length ds > 9
              then Nothing
-             else Just (sgn * read (Text.unpack ds) :: Int)
+             else Just (sgn * fromInteger (integerFromDigits 10 ds) :: Int)
       _ -> Nothing
-    let coeff = read (Text.unpack (intPart <> fracPart)) :: Integer
+    let coeff = integerFromDigits 10 (intPart <> fracPart)
         signed = if neg then negate coeff else coeff
     pure (Finite (scientific signed (expo - Text.length fracPart)))

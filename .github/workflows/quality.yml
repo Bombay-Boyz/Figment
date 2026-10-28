@@ -1,0 +1,90 @@
+# Checks that the generated haskell-ci workflow does not run. Kept in a
+# separate file so `haskell-ci regenerate` can never delete them.
+name: quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The compile-time guarantees (EmptyType, PartialSum, NoValueSemigroup,
+  # the Ok fixture) are checked by compiling fixtures that must (not)
+  # typecheck. `cabal test` cannot do this, so it is its own job.
+  compile-fail:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.12.4'
+          cabal-version: 'latest'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.setup.outputs.cabal-store }}
+            dist-newstyle
+          key: compile-fail-${{ runner.os }}-${{ hashFiles('figment.cabal', 'cabal.project') }}
+      - run: cabal update
+      - run: cabal build lib:figment
+      - run: bash scripts/check-compile-fail.sh
+
+  # Builds with -Werror (the `dev` flag) on every supported compiler, and
+  # runs the whole test-suite, including the hardening tests.
+  strict:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ghc: ['9.10.3', '9.12.4']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: 'latest'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.setup.outputs.cabal-store }}
+            dist-newstyle
+          key: strict-${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('figment.cabal', 'cabal.project') }}
+      - run: cabal update
+      - run: cabal build all --enable-tests --enable-benchmarks --flags=dev
+      - run: cabal test --flags=dev --test-show-details=direct
+
+  # Smoke-runs the benchmarks (so they cannot rot) and keeps the numbers
+  # as an artifact, the baseline that ADR 011 asks for. The benchmark
+  # executable is built with `-T`, so allocation and GC columns are filled.
+  bench-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.12.4'
+          cabal-version: 'latest'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.setup.outputs.cabal-store }}
+            dist-newstyle
+          key: bench-${{ runner.os }}-${{ hashFiles('figment.cabal', 'cabal.project') }}
+      - run: cabal update
+      - run: cabal bench --benchmark-options='--time-limit 0.2 --json bench.json'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-${{ github.sha }}
+          path: bench.json
+          if-no-files-found: ignore

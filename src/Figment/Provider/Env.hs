@@ -35,9 +35,11 @@ module Figment.Provider.Env
   , envVariableName
   ) where
 
+import Data.Bifunctor (first)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import System.Environment (getEnvironment)
@@ -45,6 +47,7 @@ import System.Environment (getEnvironment)
 import Figment.Core
 import Figment.Error
 import Figment.Internal.Nest
+import Figment.Internal.Text (isUndecodable)
 import Figment.Internal.ValueParser (parseValue)
 import Figment.Metadata
 import Figment.Path
@@ -130,7 +133,7 @@ envVariableName e p =
 keyOf :: Env -> Text -> Maybe [Text]
 keyOf e name = do
   rest <- stripPrefixCI (envPrefix e) name
-  k <- foldl (\acc f -> acc >>= f) (Just rest) (envChain e)
+  k <- foldl' (\acc f -> acc >>= f) (Just rest) (envChain e)
   let k' = if envLower e then Text.toLower k else k
       segs = Text.splitOn "." k'
   if Text.null k' || any Text.null segs then Nothing else Just segs
@@ -145,18 +148,30 @@ instance Provider Env where
     withInterpolater (\_ p -> envVariableName e p) $
       named (if Text.null (envPrefix e) then "environment variables" else "environment variables (prefix " <> envPrefix e <> ")")
   provide lim e = do
-    vars <- case envSnapshot e of
-      Just vs -> pure vs
-      Nothing -> map (\(k, v) -> (Text.pack k, Text.pack v)) <$> getEnvironment
+    -- GHC decodes bytes that are not valid UTF-8 into U+DC80..U+DCFF, and
+    -- 'Text.pack' would silently turn those into U+FFFD. Remember which
+    -- variables are affected so they can be reported instead of corrupted.
+    (vars, undecodable) <- case envSnapshot e of
+      Just vs -> pure (vs, Set.empty)
+      Nothing -> do
+        environment <- getEnvironment
+        pure
+          ( [(Text.pack k, Text.pack v) | (k, v) <- environment]
+          , Set.fromList [Text.pack k | (k, v) <- environment, any isUndecodable k || any isUndecodable v]
+          )
     let relevant =
           [ (name, ks, val)
           | (name, val) <- sortOn fst vars
           , not (envIgnoreEmpty e && Text.null val)
           , Just ks <- [keyOf e name]
           ]
-        parsed = [ (name, ks, ) <$> parse val | (name, ks, val) <- relevant ]
-        parse val
-          | envParsed e = parseValue lim val
+        -- errors about one variable are located at its key, so the report
+        -- names the variable
+        at ks = atPath (fromSegments (map Key ks))
+        parsed = [ (name, ks, ) <$> parse name ks val | (name, ks, val) <- relevant ]
+        parse name ks val
+          | name `Set.member` undecodable = Left (at ks (configError (SyntaxError "the value is not valid UTF-8 (or the process locale is not a UTF-8 locale)")))
+          | envParsed e = first (at ks) (parseValue lim val)
           | otherwise = Right (Value untagged {tagRaw = Just val} (String val))
         failures = [ err | Left err <- parsed ]
     pure $ case fromErrorList failures of
