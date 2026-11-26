@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.3.0.0 — unreleased
+
+Hardening release. It follows 0.2.0.0 and contains everything merged after
+the `v0.2.0.0` tag. It is a major version under the PVP because the public
+`ErrorKind` type gained a constructor (`TooManyBytes`), which breaks
+exhaustive pattern matches in user code.
+
+### Added
+- `TooManyBytes` error kind and a per-source size limit: `maxBytes`,
+  `withMaxBytes`, `defaultMaxBytes` (32 MiB by default). Files larger than
+  the limit are never opened for reading; other sources are checked before
+  parsing.
+- A linear pre-scan that rejects deeply bracketed TOML before the parser
+  builds it.
+- Error text escaping: control characters, line and paragraph separators
+  and bidirectional overrides in keys, file names and messages can no
+  longer forge report lines; reports show at most 100 errors.
+- Handle guards in `Figment.Jail`: nested jails, use after the jail ends
+  and paths that escape the jail are errors instead of hangs or silent
+  misbehaviour.
+- `SECURITY.md`, `CONTRIBUTING.md`, issue and pull request templates,
+  `.hlint.yaml`, and ADR 026 (the `unsafePerformIO` in `Figment.Jail`).
+
+### Changed
+- `load` now evaluates each provider's result inside its exception
+  handler, so an exception hidden in a lazily built value becomes an
+  `IoError` instead of escaping later.
+- A YAML mapping may contain at most one merge key (`<<`); a second is a
+  `DuplicateKey` error.
+- YAML parsing gives up as soon as the event stream exceeds the node or
+  depth limit instead of buffering all of it.
+- Unreadable locations during the upward search for a file are reported
+  instead of being treated as an absent file.
+- Suggestions for unknown fields are computed with bounded work.
+- `ENGINEERING_STANDARD.md` is no longer shipped in the source
+  distribution (it remains in the repository).
+
 ## 0.2.0.0 — 2026-10-22
 
 A breaking redesign, following a forensic audit of 0.1

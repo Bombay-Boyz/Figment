@@ -1,0 +1,5 @@
+# Run on the library only:  hlint src
+# Mirrors the ban list in ENGINEERING_STANDARD.md section 5.2.
+- functions:
+    - {name: [head, tail, init, last, fromJust, undefined, error, unsafePerformIO], within: []}
+    - {name: unsafePerformIO, within: [Figment.Jail]}

@@ -241,7 +241,7 @@ cabal bench
 
 Supported compilers: GHC 9.10 and 9.12.
 
-Version 0.2.0.0 is a breaking redesign of 0.1; see the changelog. The
+Version 0.2.0.0 was a breaking redesign of 0.1; 0.3.0.0 is a hardening release (see the changelog). The
 source distribution also contains the design record: `ADRs/` (decisions
 016 onwards apply to 0.2) and `docs/audit-remediation.md` (each problem
 found in 0.1, how it was fixed, and the test that pins it).

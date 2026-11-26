@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               figment
-version:            0.2.0.0
+version:            0.3.0.0
 synopsis:           Layered configuration with provenance, profiles and complete error reports
 description:
   A Haskell take on Rust's figment. Combine configuration from files
@@ -27,7 +27,6 @@ tested-with:        GHC == 9.10.3 || == 9.12.4
 extra-doc-files:
   README.md
   CHANGELOG.md
-  ENGINEERING_STANDARD.md
   ADRs/*.md
   docs/*.md
 extra-source-files:

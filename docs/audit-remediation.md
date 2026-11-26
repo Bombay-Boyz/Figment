@@ -53,7 +53,8 @@ behaviour that the tests exercise.
 
 ## Not done (and why)
 
-- **hlint / formatter in CI.** No hlint binary exists for the platform
+- **hlint / formatter in CI.** (0.3.0.0: `.hlint.yaml` and advisory CI jobs added; make them blocking once the code is clean.)
+  Original note: No hlint binary exists for the platform
   this release was prepared on, so a lint gate could not be run locally
   before adding it. Recommended next step: add a `haskell-actions/hlint-run`
   job and fourmolu once the code has been formatted once.
