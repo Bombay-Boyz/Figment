@@ -47,6 +47,7 @@ module Figment.Decode
     -- * Magic types
   , Tagged (..)
   , taggedMetadata
+  , Secret (..)
   , RelativePath (..)
   , relative
     -- * Internals shared with "Figment.Partial"
@@ -274,6 +275,17 @@ class FromConfigKey k where
 
 instance FromConfigKey Text where fromConfigKey = Right
 instance FromConfigKey [Char] where fromConfigKey = Right . Text.unpack
+instance FromConfigKey Int where fromConfigKey = integralKey
+instance FromConfigKey Integer where fromConfigKey = integralKey
+
+integralKey :: Integral a => Text -> Either Text a
+integralKey t = case Text.unpack t of
+  ('-' : ds) | validDigits ds -> Right (negate (digits ds))
+  ds | validDigits ds -> Right (digits ds)
+  _ -> Left "an integer key"
+  where
+    validDigits ds = not (Prelude.null ds) && length ds <= 18 && all isDigit ds
+    digits = foldl (\a d -> a * 10 + fromIntegral (fromEnum d - 48)) 0
 
 ------------------------------------------------------------------------
 -- Scalars
@@ -470,7 +482,7 @@ at c xs i = case xs Vector.!? i of
 isoD :: ISO8601 t => Text -> Decoder t
 isoD what = Decoder $ \c v -> case unDecoder textual c v of
   Failure e -> Failure e
-  Success t -> case iso8601ParseM (Text.unpack (Text.strip t)) of
+  Success t -> case iso8601ParseM (spaceToT (Text.strip t)) of
     Just x -> Success x
     Nothing -> valueError c v ("an ISO 8601 " <> what)
 
@@ -482,11 +494,55 @@ instance FromConfig UTCTime where
   fromConfig = Decoder $ \c v -> case unDecoder textual c v of
     Failure e -> Failure e
     Success t ->
-      let s = Text.unpack (Text.strip t)
-      in case (iso8601ParseM s, iso8601ParseM s) of
-           (Just z, _) -> Success (zonedTimeToUTC z)
-           (_, Just u) -> Success u
-           _ -> valueError c v "an ISO 8601 date-time with offset"
+      let s = spaceToT (Text.strip t)
+      in case iso8601ParseM s of
+           Just z -> Success (zonedTimeToUTC z)
+           Nothing -> case iso8601ParseM s of
+             Just u -> Success u
+             Nothing -> valueError c v "an ISO 8601 date-time with offset"
+
+-- | RFC 3339 allows a space where ISO 8601 has the @T@ separator
+-- (@2024-01-02 03:04:05@). Only a space directly after a @yyyy-mm-dd@ date
+-- is replaced.
+spaceToT :: Text -> String
+spaceToT t = case Text.splitAt 10 t of
+  (d, rest)
+    | Just (' ', time) <- Text.uncons rest
+    , not (Text.null time)
+    , isDate (Text.unpack d) -> Text.unpack d <> "T" <> Text.unpack time
+  _ -> Text.unpack t
+  where
+    isDate [y1, y2, y3, y4, '-', m1, m2, '-', d1, d2] = all isDigit [y1, y2, y3, y4, m1, m2, d1, d2]
+    isDate _ = False
+
+------------------------------------------------------------------------
+-- Secrets
+
+-- | A value that must never appear in a report. Decoding failures name
+-- the expected type but never quote what was found, and 'Show' prints a
+-- placeholder. Use it for passwords, tokens and keys:
+--
+-- > data Db = Db { host :: Text, password :: Secret Text }
+newtype Secret a = Secret {revealSecret :: a}
+  deriving newtype (Eq)
+
+instance Show (Secret a) where
+  showsPrec _ _ = showString "Secret <redacted>"
+
+instance FromConfig a => FromConfig (Secret a) where
+  fromConfig = Decoder $ \c v -> case unDecoder (fromConfig :: Decoder a) c v of
+    Success a -> Success (Secret a)
+    Failure es -> Failure (redact es)
+    where
+      redact es = case map (single . hide) (errorList es) of
+        x : xs -> foldl (<>) x xs
+        [] -> es
+      hide e = e {errorKind = hideKind (errorKind e)}
+      hideKind = \case
+        InvalidType _ ex -> InvalidType "a hidden value" ex
+        InvalidValue _ ex -> InvalidValue "a hidden value" ex
+        Message _ -> Message "invalid secret value"
+        k -> k
 
 ------------------------------------------------------------------------
 -- Magic types

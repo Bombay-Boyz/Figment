@@ -96,6 +96,24 @@ tests =
         case extract l :: Either ConfigErrors Outer of
           Left es -> assertBool (Text.unpack (renderErrors es)) ("`APP_DB__PORT`" `Text.isInfixOf` renderErrors es)
           Right v -> assertFailure (show v)
+    , testCase "R5: duplicate keys in an inline table are reported" $ do
+        r <- env [("APP_M", "{a = 1, a = 2}")] (prefixed "APP_")
+        either (map errorKind . errorList) (const []) r @?= [DuplicateKey "a"]
+    , testCase "R5: \\u escapes decode and unknown escapes are not silently dropped" $ do
+        l <- ok [("APP_A", "\"caf\\u00e9\""), ("APP_B", "\"x\\qy\"")] (prefixed "APP_")
+        node "a" l @?= Just (String "caf\233")
+        node "b" l @?= Just (String "\"x\\qy\"")
+    , testCase "R3: structured env values obey the node and byte limits" $ do
+        let big = "[" <> Text.replicate 50 "1," <> "1]"
+        r <- load (withLimits (either (const defaultLimits) id (mkLimits 64 10)) (from (Env.fromList [("APP_L", big)] (prefixed "APP_"))))
+        either (map errorKind . errorList) (const []) r @?= [TooManyNodes 10]
+    , testCase "S1: a Secret never shows the value in decode errors or Show" $ do
+        l <- ok [("APP_PASSWORD", "hunter2")] (prefixed "APP_")
+        case extractAt (keyPath "password") l :: Either ConfigErrors (Secret Int) of
+          Left es -> assertBool (Text.unpack (renderErrors es)) (not ("hunter2" `Text.isInfixOf` renderErrors es))
+          Right v -> assertFailure (show v)
+        extractAt (keyPath "password") l @?= Right (Secret ("hunter2" :: Text))
+        show (Secret ("hunter2" :: Text)) @?= "Secret <redacted>"
     , testCase "reads the real process environment" $ Jail.withJail $ \j -> do
         Jail.clearEnv j
         Jail.setEnv j "JAILED_HOST" "real"

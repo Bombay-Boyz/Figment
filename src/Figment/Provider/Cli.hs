@@ -51,13 +51,15 @@ data Cli = Cli
   , cliKeyMap :: Text -> Text
   , cliParsed :: Bool
   , cliProfile :: Profile
+  , cliCustomKeys :: Bool
+    -- ^ a custom 'keyMap' is in use, so key names are shown as mapped
   , cliInvalid :: [Int]
     -- ^ positions (from 1) of arguments that are not valid UTF-8
   }
 
 -- | A CLI provider over the given arguments.
 cli :: [Text] -> Cli
-cli args = Cli args (Text.replace "-" "_") True Default []
+cli args = Cli args (Text.replace "-" "_") True Default False []
 
 -- | The arguments of the running process.
 cliFromProcess :: IO Cli
@@ -70,7 +72,7 @@ cliFromProcess = do
 
 -- | How each key segment is mapped (default: dashes to underscores).
 keyMap :: (Text -> Text) -> Cli -> Cli
-keyMap f c = c {cliKeyMap = f}
+keyMap f c = c {cliKeyMap = f, cliCustomKeys = True}
 
 -- | Do not parse values: every value is a string.
 unparsedCli :: Cli -> Cli
@@ -113,9 +115,13 @@ parseArgs c = go (cliArgs c)
           in if any Text.null segs then Nothing else Just segs
 
 instance Provider Cli where
-  metadata _ =
-    withInterpolater (\_ p -> "--" <> Text.intercalate "." [Text.replace "_" "-" k | Key k <- segments p]) $
+  metadata c =
+    withInterpolater (\_ p -> "--" <> Text.intercalate "." [shown k | Key k <- segments p]) $
       named "command-line arguments"
+    where
+      -- the default key map turned @-@ into @_@; undo that for display
+      -- (a custom map cannot be undone in general, so its keys show as mapped)
+      shown k = if cliCustomKeys c then k else Text.replace "_" "-" k
   provide lim c = pure $
     let args = parseArgs c
         -- messages name an option, never echo its value (it may be a secret)

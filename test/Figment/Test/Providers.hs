@@ -87,6 +87,17 @@ jsonTests =
       case kinds es of
         [SyntaxError _] -> pure ()
         other -> assertFailure (show other)
+  , testCase "C6: a space separates date and time (RFC 3339)" $ do
+      l <- expectOk (from (fromText json "{\"t\":\"2024-01-02 03:04:05\",\"u\":\"2024-01-02 03:04:05Z\"}"))
+      extractAt (keyPath "t") l @?= Right (read "2024-01-02 03:04:05" :: LocalTime)
+      extractAt (keyPath "u") l @?= Right (read "2024-01-02 03:04:05 UTC" :: UTCTime)
+  , testCase "C2: maps with integer keys" $ do
+      l <- expectOk (from (fromText json "{\"m\":{\"1\":\"a\",\"-2\":\"b\"}}"))
+      extractAt (keyPath "m") l @?= Right (Map.fromList [(1 :: Int, "a" :: Text), (-2, "b")])
+      l2 <- expectOk (from (fromText json "{\"m\":{\"x\":\"a\"}}"))
+      case (extractAt (keyPath "m") l2 :: Either ConfigErrors (Map.Map Int Text)) of
+        Left _ -> pure ()
+        Right v -> assertFailure (show v)
   , testCase "big and precise numbers survive exactly" $ do
       l <- expectOk (from (fromText json "{\"n\":123456789012345678901234567890.123456789}"))
       fmap (valueNode) (findValue (keyPath "n") l) @?= Just (Num (Finite 123456789012345678901234567890.123456789))

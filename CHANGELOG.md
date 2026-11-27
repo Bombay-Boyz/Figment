@@ -17,6 +17,16 @@ exhaustive pattern matches in user code.
   toml-parser builds its whole syntax tree.
 
 ### Added
+- `Secret a`: a wrapper whose decode errors never quote the value and whose
+  `Show` prints `Secret <redacted>`. Use it for passwords and tokens.
+- `FromConfigKey` instances for `Int` and `Integer`, so `Map Int a` decodes.
+- Environment and CLI values: structured values obey `maxBytes` and
+  `maxNodes`; duplicate keys in an inline table are reported; `\uXXXX`
+  escapes decode and unknown escapes are no longer silently dropped.
+- Date-time decoders accept a space between date and time (RFC 3339).
+- The CLI provider names options as mapped by a custom `keyMap`.
+- `base` upper bound widened to `< 4.23` (GHC 9.14). Dependencies may not
+  support GHC 9.14 yet; it is tested in CI as an experimental job only.
 - `TooManyBytes` error kind and a per-source size limit: `maxBytes`,
   `withMaxBytes`, `defaultMaxBytes` (32 MiB by default). Files larger than
   the limit are never opened for reading; other sources are checked before
