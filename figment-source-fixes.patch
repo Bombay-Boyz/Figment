@@ -1,0 +1,294 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index dba9f46..85816d9 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -7,6 +7,15 @@ the `v0.2.0.0` tag. It is a major version under the PVP because the public
+ `ErrorKind` type gained a constructor (`TooManyBytes`), which breaks
+ exhaustive pattern matches in user code.
+ 
++### Hardening (source)
++
++- Error rendering now escapes control, bidirectional and zero-width characters
++  in every message, hint and type description, not just keys and file names.
++- A leading byte-order mark is ignored in JSON and TOML input.
++- TOML: the linear pre-scan also counts structural tokens and rejects a
++  document with more than `5 * maxNodes` of them as `TooManyNodes`, before
++  toml-parser builds its whole syntax tree.
++
+ ### Added
+ - `TooManyBytes` error kind and a per-source size limit: `maxBytes`,
+   `withMaxBytes`, `defaultMaxBytes` (32 MiB by default). Files larger than
+diff --git a/src/Figment/Error.hs b/src/Figment/Error.hs
+index ecd26db..3fcdd78 100644
+--- a/src/Figment/Error.hs
++++ b/src/Figment/Error.hs
+@@ -143,15 +143,15 @@ describeKind = \case
+   DuplicateKey k -> "duplicate key " <> tick k
+   KeyConflict a b -> tick a <> " conflicts with " <> tick b
+     <> ": one sets a value where the other needs a dictionary"
+-  InvalidType actual expected -> "invalid type: found " <> actual <> ", expected " <> expected
+-  InvalidValue actual expected -> "invalid value: found " <> actual <> ", expected " <> expected
+-  InvalidLength n expected -> "invalid length " <> tshow n <> ", expected " <> expected
++  InvalidType actual expected -> "invalid type: found " <> escapeControl actual <> ", expected " <> escapeControl expected
++  InvalidValue actual expected -> "invalid value: found " <> escapeControl actual <> ", expected " <> escapeControl expected
++  InvalidLength n expected -> "invalid length " <> tshow n <> ", expected " <> escapeControl expected
+   MissingField f -> "missing field " <> tick f
+   UnknownField f _ -> "unknown field " <> tick f
+   UnknownVariant v valid -> "unknown variant " <> tick v <> ", expected one of "
+     <> Text.intercalate ", " (map tick valid)
+-  Message t -> t
+-  InvalidArgument t -> "invalid argument: " <> t
++  Message t -> escapeControl t
++  InvalidArgument t -> "invalid argument: " <> escapeControl t
+ 
+ -- | A multi-line, human-oriented rendering:
+ --
+@@ -163,7 +163,7 @@ renderError e =
+   Text.intercalate "\n" $
+     ("error: " <> describeKind (errorKind e))
+       : location
+-      ++ map ("  = hint: " <>) (suggestions ++ errorHints e)
++      ++ map (("  = hint: " <>) . escapeControl) (suggestions ++ errorHints e)
+   where
+     suggestions = case errorKind e of
+       UnknownField _ (s : ss) -> ["did you mean " <> Text.intercalate " or " (map tick (s : ss)) <> "?"]
+diff --git a/src/Figment/Internal/Text.hs b/src/Figment/Internal/Text.hs
+index a22e4ca..b2842ec 100644
+--- a/src/Figment/Internal/Text.hs
++++ b/src/Figment/Internal/Text.hs
+@@ -10,6 +10,7 @@ module Figment.Internal.Text
+   , escapeChar
+   , escapeControl
+   , isUndecodable
++  , stripBom
+   ) where
+ 
+ import Data.Char (isControl, ord)
+@@ -28,6 +29,10 @@ needsEscape c =
+     || c == '\x2029'
+     || (c >= '\x202A' && c <= '\x202E')
+     || (c >= '\x2066' && c <= '\x2069')
++    || (c >= '\x200B' && c <= '\x200F') -- zero-width space/joiners, LRM, RLM
++    || (c >= '\x2060' && c <= '\x2064') -- word joiner, invisible operators
++    || c == '\x061C' -- Arabic letter mark
++    || c == '\xFEFF' -- zero-width no-break space / BOM
+ 
+ -- | The escaped spelling of one character: @\\n@, @\\r@, @\\t@, otherwise
+ -- @\\u{hex}@. Total on every 'Char'.
+@@ -51,3 +56,9 @@ escapeControl t
+ -- this predicate to reject such input instead of corrupting it.
+ isUndecodable :: Char -> Bool
+ isUndecodable c = c >= '\xDC80' && c <= '\xDCFF'
++
++-- | Drop one leading byte-order mark, if present.
++stripBom :: Text -> Text
++stripBom t = case Text.uncons t of
++  Just ('\xFEFF', r) -> r
++  _ -> t
+diff --git a/src/Figment/Internal/TomlScan.hs b/src/Figment/Internal/TomlScan.hs
+index 2a53499..584dafd 100644
+--- a/src/Figment/Internal/TomlScan.hs
++++ b/src/Figment/Internal/TomlScan.hs
+@@ -7,6 +7,8 @@
+ -- @{@ outside strings and comments in O(n) time and O(1) space.
+ module Figment.Internal.TomlScan
+   ( bracketOverflow
++  , Overflow (..)
++  , scanOverflow
+   ) where
+ 
+ import Data.Text (Text)
+@@ -28,55 +30,74 @@ data Mode
+ -- like any other bracket while they are open, so callers should pass the
+ -- depth limit plus two to avoid rejecting valid documents.
+ bracketOverflow :: Int -> Text -> Maybe Pos
+-bracketOverflow limit txt = go Normal 0 0 txt
++bracketOverflow limit txt = snd <$> scanOverflow limit maxBound txt
++
++-- | Why a document was rejected before parsing.
++data Overflow = TooDeep | TooBig
++  deriving stock (Eq, Show)
++
++-- | @scanOverflow depthLimit tokenLimit text@: like 'bracketOverflow', and
++-- also rejects a document with more than @tokenLimit@ structural characters
++-- (@=@, @,@, @[@, @{@, @.@) outside strings and comments. Every value in a
++-- TOML document needs at least one such character per five values it
++-- creates, so a limit of @5 * maxNodes@ never rejects a document that the
++-- node budget would accept, but stops a huge document before toml-parser
++-- builds its whole syntax tree.
++scanOverflow :: Int -> Int -> Text -> Maybe (Overflow, Pos)
++scanOverflow limit tokLimit txt = go Normal 0 0 0 txt
+   where
+-    go :: Mode -> Int -> Int -> Text -> Maybe Pos
+-    go !mode !depth !off t = case Text.uncons t of
++    go :: Mode -> Int -> Int -> Int -> Text -> Maybe (Overflow, Pos)
++    go !mode !depth !toks !off t = case Text.uncons t of
+       Nothing -> Nothing
+       Just (c, rest) -> case mode of
+         Normal -> case c of
+-          '#' -> go Comment depth (off + 1) rest
++          '#' -> go Comment depth toks (off + 1) rest
+           '"'
+-            | "\"\"" `Text.isPrefixOf` rest -> go MultiBasic depth (off + 3) (Text.drop 2 rest)
+-            | otherwise -> go Basic depth (off + 1) rest
++            | "\"\"" `Text.isPrefixOf` rest -> go MultiBasic depth toks (off + 3) (Text.drop 2 rest)
++            | otherwise -> go Basic depth toks (off + 1) rest
+           '\''
+-            | "''" `Text.isPrefixOf` rest -> go MultiLiteral depth (off + 3) (Text.drop 2 rest)
+-            | otherwise -> go Literal depth (off + 1) rest
++            | "''" `Text.isPrefixOf` rest -> go MultiLiteral depth toks (off + 3) (Text.drop 2 rest)
++            | otherwise -> go Literal depth toks (off + 1) rest
+           _
+             | c == '[' || c == '{' ->
+                 if depth + 1 > limit
+-                  then Just (posAt off)
+-                  else go Normal (depth + 1) (off + 1) rest
+-            | c == ']' || c == '}' -> go Normal (max 0 (depth - 1)) (off + 1) rest
+-            | otherwise -> go Normal depth (off + 1) rest
++                  then Just (TooDeep, posAt off)
++                  else tok (depth + 1)
++            | c == ']' || c == '}' -> go Normal (max 0 (depth - 1)) toks (off + 1) rest
++            | c == '=' || c == ',' || c == '.' -> tok depth
++            | otherwise -> go Normal depth toks (off + 1) rest
++            where
++              tok d'
++                | toks + 1 > tokLimit = Just (TooBig, posAt off)
++                | otherwise = go Normal d' (toks + 1) (off + 1) rest
+         Comment
+-          | c == '\n' -> go Normal depth (off + 1) rest
+-          | otherwise -> go Comment depth (off + 1) rest
++          | c == '\n' -> go Normal depth toks (off + 1) rest
++          | otherwise -> go Comment depth toks (off + 1) rest
+         Basic -> case c of
+-          '\\' -> go Basic depth (off + 1 + skipped rest) (Text.drop 1 rest)
+-          '"' -> go Normal depth (off + 1) rest
+-          '\n' -> go Normal depth (off + 1) rest -- unterminated: the real parser reports it
+-          _ -> go Basic depth (off + 1) rest
++          '\\' -> go Basic depth toks (off + 1 + skipped rest) (Text.drop 1 rest)
++          '"' -> go Normal depth toks (off + 1) rest
++          '\n' -> go Normal depth toks (off + 1) rest -- unterminated: the real parser reports it
++          _ -> go Basic depth toks (off + 1) rest
+         Literal -> case c of
+-          '\'' -> go Normal depth (off + 1) rest
+-          '\n' -> go Normal depth (off + 1) rest
+-          _ -> go Literal depth (off + 1) rest
++          '\'' -> go Normal depth toks (off + 1) rest
++          '\n' -> go Normal depth toks (off + 1) rest
++          _ -> go Literal depth toks (off + 1) rest
+         MultiBasic -> case c of
+-          '\\' -> go MultiBasic depth (off + 1 + skipped rest) (Text.drop 1 rest)
++          '\\' -> go MultiBasic depth toks (off + 1 + skipped rest) (Text.drop 1 rest)
+           '"'
+             | "\"\"" `Text.isPrefixOf` rest ->
+                 -- the closing delimiter may be preceded by up to two content quotes
+                 let after = Text.drop 2 rest
+                     k = Text.length (Text.takeWhile (== '"') (Text.take 2 after))
+-                 in go Normal depth (off + 3 + k) (Text.drop k after)
+-          _ -> go MultiBasic depth (off + 1) rest
++                 in go Normal depth toks (off + 3 + k) (Text.drop k after)
++          _ -> go MultiBasic depth toks (off + 1) rest
+         MultiLiteral -> case c of
+           '\''
+             | "''" `Text.isPrefixOf` rest ->
+                 let after = Text.drop 2 rest
+                     k = Text.length (Text.takeWhile (== '\'') (Text.take 2 after))
+-                 in go Normal depth (off + 3 + k) (Text.drop k after)
+-          _ -> go MultiLiteral depth (off + 1) rest
++                 in go Normal depth toks (off + 3 + k) (Text.drop k after)
++          _ -> go MultiLiteral depth toks (off + 1) rest
+ 
+     -- an escape consumes the next character too (if there is one)
+     skipped r = if Text.null r then 0 else 1
+diff --git a/src/Figment/Provider/Json.hs b/src/Figment/Provider/Json.hs
+index eef205a..0c37232 100644
+--- a/src/Figment/Provider/Json.hs
++++ b/src/Figment/Provider/Json.hs
+@@ -11,8 +11,10 @@ import qualified Data.Aeson.Decoding.ByteString as Tok
+ import Data.Aeson.Decoding.Tokens
+ import qualified Data.Aeson.Key as Key
+ import Data.ByteString (ByteString)
++import qualified Data.ByteString as BS
+ import qualified Data.ByteString.Char8 as BC
+ import qualified Data.Map.Strict as Map
++import Data.Maybe (fromMaybe)
+ import qualified Data.Text as Text
+ import qualified Data.Vector as Vector
+ 
+@@ -29,8 +31,9 @@ json = Format "JSON" (\lim bs -> pure (parseJson lim bs))
+ 
+ -- | Parse a JSON document, enforcing the limits.
+ parseJson :: Limits -> ByteString -> Either ConfigError Value
+-parseJson lim bs = checkBytes lim bs *> runBudget lim parse
++parseJson lim bs0 = checkBytes lim bs0 *> runBudget lim parse
+   where
++    bs = fromMaybe bs0 (BS.stripPrefix (BS.pack [0xEF, 0xBB, 0xBF]) bs0)
+     parse = do
+       (v, rest) <- value 1 root (Tok.bsToTokens bs)
+       if BC.all (`elem` (" \t\r\n" :: String)) rest
+diff --git a/src/Figment/Provider/Toml.hs b/src/Figment/Provider/Toml.hs
+index e8b0bdb..b8fd258 100644
+--- a/src/Figment/Provider/Toml.hs
++++ b/src/Figment/Provider/Toml.hs
+@@ -19,7 +19,8 @@ import qualified Toml.Syntax as T
+ 
+ import Figment.Error
+ import Figment.Internal.Budget
+-import Figment.Internal.TomlScan (bracketOverflow)
++import Figment.Internal.Text (stripBom)
++import Figment.Internal.TomlScan (Overflow (..), scanOverflow)
+ import Figment.Limits
+ import Figment.Metadata (Pos (..))
+ import Figment.Path
+@@ -36,13 +37,16 @@ parseToml lim bs = do
+   checkBytes lim bs
+   txt <- case TE.decodeUtf8' bs of
+     Left e -> Left (configError (SyntaxError ("invalid UTF-8: " <> Text.pack (show e))))
+-    Right t -> Right t
++    Right t -> Right (stripBom t)
+   -- toml-parser builds its whole syntax tree before figment sees a single
+   -- value, so a pathologically nested document is rejected here, by one
+   -- linear pass, before the parser is asked to build it. Table headers
+   -- count as brackets while open, hence the allowance of two.
+-  case bracketOverflow (if maxDepth lim >= maxBound - 2 then maxBound else maxDepth lim + 2) txt of
+-    Just at -> Left (withPos (Just at) (configError (DepthExceeded (maxDepth lim))))
++  let depthCap = if maxDepth lim >= maxBound - 2 then maxBound else maxDepth lim + 2
++      tokCap = if maxNodes lim >= maxBound `div` 5 then maxBound else 5 * maxNodes lim
++  case scanOverflow depthCap tokCap txt of
++    Just (TooDeep, at) -> Left (withPos (Just at) (configError (DepthExceeded (maxDepth lim))))
++    Just (TooBig, at) -> Left (withPos (Just at) (configError (TooManyNodes (maxNodes lim))))
+     Nothing -> Right ()
+   exprs <- case T.parseRawToml txt of
+     Left (T.Located p msg) -> Left (withPos (Just (pos p)) (configError (SyntaxError (Text.pack msg))))
+diff --git a/test/Figment/Test/Hardening.hs b/test/Figment/Test/Hardening.hs
+index 20767a7..c93b49d 100644
+--- a/test/Figment/Test/Hardening.hs
++++ b/test/Figment/Test/Hardening.hs
+@@ -19,6 +19,7 @@ import Test.Tasty
+ import Test.Tasty.HUnit
+ 
+ import Figment
++import Figment.Error (addHints, configError)
+ import qualified Figment.Jail as Jail
+ import Figment.Path (fromSegments)
+ import qualified Figment.Provider.Cli as Cli
+@@ -295,6 +296,20 @@ jail =
+         bracket_ (Blank.setEnv "FIGMENT_HARDENING_EMPTY" "" True) (Env.unsetEnv "FIGMENT_HARDENING_EMPTY") $ do
+           Jail.withJail $ \j -> Jail.setEnv j "FIGMENT_HARDENING_EMPTY" "changed"
+           Env.lookupEnv "FIGMENT_HARDENING_EMPTY" >>= (@?= Just "")
++    , testCase "S2: custom messages and hints cannot forge lines or hide characters" $ do
++        let e = addHints ["h\nforged\x202Ex"] (configError (Message "a\nb\x200Bc\xFEFFd"))
++            out = renderError e
++        assertBool (Text.unpack out) (not (Text.any (`elem` ['\x200B', '\x202E', '\xFEFF']) out))
++        length (Text.lines out) @?= 3
++    , testCase "R1: a TOML document with far too many tokens is rejected before parsing" $ do
++        let doc = Text.concat (replicate 200 "a = 1\n")
++        kinds (withLimits (limits 64 10) (from (fromText toml doc))) >>= (@?= [TooManyNodes 10])
++    , testCase "R1: dotted keys and commas count towards the pre-scan" $ do
++        let doc = "a = [" <> Text.replicate 200 "1," <> "1]\n"
++        kinds (withLimits (limits 64 10) (from (fromText toml doc))) >>= (@?= [TooManyNodes 10])
++    , testCase "C4: a byte-order mark before JSON is ignored" $ do
++        r <- load (from (fromText json "\xFEFF{\"a\":1}"))
++        either (const Nothing) (Just . (extractAt (keyPath "a") :: Loaded -> Either ConfigErrors Int)) r @?= Just (Right 1)
+     , testCase "variables set inside a jail are gone after it" $ do
+         Jail.withJail $ \j -> Jail.setEnv j "FIGMENT_HARDENING_TMP" "x"
+         Env.lookupEnv "FIGMENT_HARDENING_TMP" >>= (@?= Nothing)
