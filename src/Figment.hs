@@ -97,6 +97,7 @@ module Figment
   , genericDecoder
   , Tagged (..)
   , taggedMetadata
+  , Secret (..)
   , RelativePath (..)
   , relative
   , ViaAeson (..)

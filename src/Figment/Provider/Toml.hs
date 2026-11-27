@@ -19,7 +19,8 @@ import qualified Toml.Syntax as T
 
 import Figment.Error
 import Figment.Internal.Budget
-import Figment.Internal.TomlScan (bracketOverflow)
+import Figment.Internal.Text (stripBom)
+import Figment.Internal.TomlScan (Overflow (..), scanOverflow)
 import Figment.Limits
 import Figment.Metadata (Pos (..))
 import Figment.Path
@@ -36,13 +37,16 @@ parseToml lim bs = do
   checkBytes lim bs
   txt <- case TE.decodeUtf8' bs of
     Left e -> Left (configError (SyntaxError ("invalid UTF-8: " <> Text.pack (show e))))
-    Right t -> Right t
+    Right t -> Right (stripBom t)
   -- toml-parser builds its whole syntax tree before figment sees a single
   -- value, so a pathologically nested document is rejected here, by one
   -- linear pass, before the parser is asked to build it. Table headers
   -- count as brackets while open, hence the allowance of two.
-  case bracketOverflow (if maxDepth lim >= maxBound - 2 then maxBound else maxDepth lim + 2) txt of
-    Just at -> Left (withPos (Just at) (configError (DepthExceeded (maxDepth lim))))
+  let depthCap = if maxDepth lim >= maxBound - 2 then maxBound else maxDepth lim + 2
+      tokCap = if maxNodes lim >= maxBound `div` 5 then maxBound else 5 * maxNodes lim
+  case scanOverflow depthCap tokCap txt of
+    Just (TooDeep, at) -> Left (withPos (Just at) (configError (DepthExceeded (maxDepth lim))))
+    Just (TooBig, at) -> Left (withPos (Just at) (configError (TooManyNodes (maxNodes lim))))
     Nothing -> Right ()
   exprs <- case T.parseRawToml txt of
     Left (T.Located p msg) -> Left (withPos (Just (pos p)) (configError (SyntaxError (Text.pack msg))))

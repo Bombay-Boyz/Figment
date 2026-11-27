@@ -19,7 +19,7 @@ module Figment.Internal.ValueParser
   , parseNumber
   ) where
 
-import Data.Char (isDigit, isSpace)
+import Data.Char (isDigit, isHexDigit, isSpace)
 import qualified Data.Map.Strict as Map
 import Data.Scientific (scientific)
 import Data.Text (Text)
@@ -35,10 +35,14 @@ import Figment.Value
 -- nested beyond the depth limit; any syntax problem falls back to the
 -- string.
 parseValue :: Limits -> Text -> Either ConfigError Value
-parseValue lim raw = case top of
-  Left (Limit e) -> Left e
-  Left NoParse -> Right (rawTagged (String raw))
-  Right n -> Right (rawTagged n)
+parseValue lim raw
+  | Text.compareLength raw (maxBytes lim) == GT = Left (configError (TooManyBytes (maxBytes lim)))
+  | otherwise = case top of
+      Left (Limit e) -> Left e
+      Left NoParse -> Right (rawTagged (String raw))
+      Right n
+        | countNodes n > maxNodes lim -> Left (configError (TooManyNodes (maxNodes lim)))
+        | otherwise -> Right (rawTagged n)
   where
     trimmed = Text.strip raw
     rawTagged n = Value untagged {tagRaw = Just raw} n
@@ -51,6 +55,13 @@ parseValue lim raw = case top of
               Right _ -> Left NoParse
               Left e -> Left e
         | otherwise -> Right (scalarNode raw trimmed)
+
+-- | The number of values in a node (itself included).
+countNodes :: Node -> Int
+countNodes = \case
+  Array xs -> 1 + sum (Vector.map (countNodes . valueNode) xs)
+  Dict m -> 1 + sum (Map.map (countNodes . valueNode) m)
+  _ -> 1
 
 data Failure = NoParse | Limit ConfigError
 
@@ -73,7 +84,8 @@ structured lim depth t0 = case Text.uncons t of
   Just ('{', rest) -> do
     guardDepth
     (kvs, rest') <- pairs rest
-    pure (mkValue (Dict (Map.fromList kvs)), rest')
+    d <- uniqueKeys kvs
+    pure (mkValue (Dict d), rest')
   Just ('"', rest) -> first' string (quotedDouble [] rest)
   Just ('\'', rest) -> first' string (quotedSingle rest)
   Just _ ->
@@ -136,6 +148,14 @@ structured lim depth t0 = case Text.uncons t of
         let (k, rest) = Text.span (\c -> not (isSpace c) && c `notElem` ("=:,{}[]" :: String)) (Text.stripStart s)
         in if Text.null k then Left NoParse else Right (k, rest)
 
+    -- a duplicate key is reported, as in every file format
+    uniqueKeys = go Map.empty
+      where
+        go m [] = Right m
+        go m ((k, v) : more)
+          | Map.member k m = Left (Limit (configError (DuplicateKey k)))
+          | otherwise = go (Map.insert k v m) more
+
     first' f r = fmap (\(a, rest) -> (f a, rest)) r
 
 -- | The body of a double-quoted string, after the opening quote. Runs
@@ -145,17 +165,35 @@ structured lim depth t0 = case Text.uncons t of
 quotedDouble :: [Text] -> Text -> P Text
 quotedDouble acc s =
   let (chunk, rest) = Text.break (\c -> c == '"' || c == '\\') s
+      -- continue after an escape, having produced the text @e@
+      next e more = quotedDouble (e : chunk : acc) more
+      unicode n r =
+        let (hex, more) = Text.splitAt n r
+            code = integerFromDigits 16 hex
+            ok = Text.length hex == n && Text.all isHexDigit hex
+         in if ok && code <= 0x10FFFF && not (code >= 0xD800 && code <= 0xDFFF)
+              then next (Text.singleton (toEnum (fromInteger code))) more
+              else Left NoParse
    in case Text.uncons rest of
         Just ('"', rest') -> Right (Text.concat (reverse (chunk : acc)), rest')
         Just (_, rest') -> case Text.uncons rest' of -- a backslash
-          Just (c, rest'') -> quotedDouble (escaped c : chunk : acc) rest''
+          Just ('u', r) -> unicode 4 r
+          Just ('U', r) -> unicode 8 r
+          Just (c, rest'') -> case simpleEscape c of
+            Just e -> next e rest''
+            Nothing -> Left NoParse -- unknown escape: not a valid string
           Nothing -> Left NoParse
         Nothing -> Left NoParse
   where
-    escaped 'n' = "\n"
-    escaped 't' = "\t"
-    escaped 'r' = "\r"
-    escaped c = Text.singleton c
+    simpleEscape = \case
+      'n' -> Just "\n"
+      't' -> Just "\t"
+      'r' -> Just "\r"
+      'b' -> Just "\b"
+      'f' -> Just "\f"
+      '"' -> Just "\""
+      '\\' -> Just "\\"
+      _ -> Nothing
 
 quotedSingle :: Text -> P Text
 quotedSingle s =

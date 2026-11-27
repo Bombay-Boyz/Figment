@@ -10,6 +10,7 @@ module Figment.Internal.Text
   , escapeChar
   , escapeControl
   , isUndecodable
+  , stripBom
   ) where
 
 import Data.Char (isControl, ord)
@@ -28,6 +29,10 @@ needsEscape c =
     || c == '\x2029'
     || (c >= '\x202A' && c <= '\x202E')
     || (c >= '\x2066' && c <= '\x2069')
+    || (c >= '\x200B' && c <= '\x200F') -- zero-width space/joiners, LRM, RLM
+    || (c >= '\x2060' && c <= '\x2064') -- word joiner, invisible operators
+    || c == '\x061C' -- Arabic letter mark
+    || c == '\xFEFF' -- zero-width no-break space / BOM
 
 -- | The escaped spelling of one character: @\\n@, @\\r@, @\\t@, otherwise
 -- @\\u{hex}@. Total on every 'Char'.
@@ -51,3 +56,9 @@ escapeControl t
 -- this predicate to reject such input instead of corrupting it.
 isUndecodable :: Char -> Bool
 isUndecodable c = c >= '\xDC80' && c <= '\xDCFF'
+
+-- | Drop one leading byte-order mark, if present.
+stripBom :: Text -> Text
+stripBom t = case Text.uncons t of
+  Just ('\xFEFF', r) -> r
+  _ -> t

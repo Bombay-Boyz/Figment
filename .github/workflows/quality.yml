@@ -88,3 +88,46 @@ jobs:
           name: bench-${{ github.sha }}
           path: bench.json
           if-no-files-found: ignore
+
+  # Advisory until the code base has been formatted and linted once; then
+  # remove `continue-on-error` to make each a blocking gate.
+  hlint:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/hlint-setup@v2
+      - uses: haskell-actions/hlint-run@v2
+        with:
+          path: src/
+          fail-on: warning
+
+  format:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/run-fourmolu@v11
+        with:
+          pattern: |
+            src/**/*.hs
+            test/**/*.hs
+            bench/**/*.hs
+
+  # The library touches the file system, the environment and paths, which
+  # differ per OS. Advisory until the first green run on each.
+  os-matrix:
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.12.4'
+          cabal-version: 'latest'
+      - run: cabal update
+      - run: cabal test --test-show-details=direct

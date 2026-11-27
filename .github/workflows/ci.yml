@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: GHC ${{ matrix.ghc }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        ghc: ['9.10.3', '9.12.4']
+        experimental: [false]
+        include:
+          # GHC 9.14 ships base-4.22. Dependencies may lag it, so this job
+          # relaxes upper bounds and its failure does not fail the build.
+          - os: ubuntu-latest
+            ghc: '9.14.1'
+            experimental: true
+            allow-newer: true
+          # Other platforms: required to pass.
+          - os: macos-latest
+            ghc: '9.12.4'
+            experimental: false
+          - os: windows-latest
+            ghc: '9.12.4'
+            experimental: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: latest
+
+      - name: Configure
+        shell: bash
+        run: |
+          cabal configure --enable-tests --enable-benchmarks --disable-documentation \
+            ${{ matrix.allow-newer && '--allow-newer' || '' }}
+          cabal build all --dry-run
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-${{ hashFiles('**/plan.json') }}
+          restore-keys: ${{ runner.os }}-ghc-${{ matrix.ghc }}-
+
+      - name: Build (warnings are errors)
+        run: cabal build all --ghc-options=-Werror
+
+      - name: Test
+        run: cabal test all --test-show-details=direct
+
+  package:
+    name: Package checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.12.4'
+          cabal-version: latest
+      - name: cabal check
+        run: cabal check
+      - name: sdist builds from the tarball alone
+        run: |
+          cabal sdist --output-dir dist-sdist
+          mkdir unpack && tar -xzf dist-sdist/figment-*.tar.gz -C unpack
+          cd unpack/figment-* && cabal build --enable-tests && cabal test
+      - name: Haddock
+        run: cabal haddock --haddock-all --enable-tests

@@ -193,9 +193,22 @@ own layering.
 
 ## Safety
 
-* **Limits** (`F.defaultLimits`: depth 64, one million values; override
-  with `F.withLimits`) are enforced inside every parser, so a hostile
-  `[[[[...` megabyte is rejected at depth 65 without being built.
+* **Limits** (`F.defaultLimits`: depth 64, one million values, 32 MiB per
+  source; override with `F.withLimits` and `F.withMaxBytes`) are enforced
+  inside the JSON and YAML parsers and on structured environment and
+  command-line values, so a hostile `[[[[...` megabyte is rejected at
+  depth 65 without being built. TOML is the exception: its parser builds
+  the whole document before figment sees a value, so TOML is guarded by a
+  linear pre-scan (bracket depth and a token count) and the size limit
+  rather than a per-value budget. Lower `maxBytes` if you read TOML you do
+  not trust.
+* **Secrets**: wrap a field in `F.Secret` (`password :: Secret Text`) and a
+  decode failure never quotes the value; `show` prints
+  `Secret <redacted>`. Other fields' errors do quote the offending value
+  (truncated), so do not decode a password into an `Int`.
+* **Reports are escaped**: control, bidirectional and zero-width characters
+  in keys, file names, messages and hints are rendered as `\u{...}`, so a
+  hostile name cannot forge extra lines in an error report.
 * No exception escapes `load`: I/O and parse failures are errors, and a
   synchronous exception thrown by a third-party provider becomes an
   `IoError` (asynchronous exceptions are re-thrown, as they must be).
@@ -239,9 +252,11 @@ bash scripts/check-compile-fail.sh   # the compile-time guarantees
 cabal bench
 ```
 
-Supported compilers: GHC 9.10 and 9.12.
+Supported compilers: GHC 9.10 and 9.12, tested in CI on Linux, macOS and
+Windows. GHC 9.14 is tried in CI as an experimental job; it will be
+supported once the dependencies (notably `scientific`) allow it.
 
-Version 0.2.0.0 is a breaking redesign of 0.1; see the changelog. The
+Version 0.2.0.0 was a breaking redesign of 0.1; 0.3.0.0 is a hardening release (see the changelog). The
 source distribution also contains the design record: `ADRs/` (decisions
 016 onwards apply to 0.2) and `docs/audit-remediation.md` (each problem
 found in 0.1, how it was fixed, and the test that pins it).

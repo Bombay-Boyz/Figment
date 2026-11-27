@@ -11,8 +11,10 @@ import qualified Data.Aeson.Decoding.ByteString as Tok
 import Data.Aeson.Decoding.Tokens
 import qualified Data.Aeson.Key as Key
 import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as Text
 import qualified Data.Vector as Vector
 
@@ -29,8 +31,9 @@ json = Format "JSON" (\lim bs -> pure (parseJson lim bs))
 
 -- | Parse a JSON document, enforcing the limits.
 parseJson :: Limits -> ByteString -> Either ConfigError Value
-parseJson lim bs = checkBytes lim bs *> runBudget lim parse
+parseJson lim bs0 = checkBytes lim bs0 *> runBudget lim parse
   where
+    bs = fromMaybe bs0 (BS.stripPrefix (BS.pack [0xEF, 0xBB, 0xBF]) bs0)
     parse = do
       (v, rest) <- value 1 root (Tok.bsToTokens bs)
       if BC.all (`elem` (" \t\r\n" :: String)) rest

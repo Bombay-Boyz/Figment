@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               figment
-version:            0.2.0.0
+version:            0.3.0.0
 synopsis:           Layered configuration with provenance, profiles and complete error reports
 description:
   A Haskell take on Rust's figment. Combine configuration from files
@@ -18,7 +18,7 @@ license:            BSD-3-Clause
 license-file:       LICENSE
 author:             Sabrinathan Nair
 maintainer:         bombay.boyz@hotmail.com
-copyright:          (c) 2026 Bombay-Boyz
+copyright:          (c) 2026 Sabrinathan Nair
 homepage:           https://github.com/Bombay-Boyz/Figment
 bug-reports:        https://github.com/Bombay-Boyz/Figment/issues
 category:           Configuration
@@ -27,7 +27,6 @@ tested-with:        GHC == 9.10.3 || == 9.12.4
 extra-doc-files:
   README.md
   CHANGELOG.md
-  ENGINEERING_STANDARD.md
   ADRs/*.md
   docs/*.md
 extra-source-files:
@@ -92,7 +91,7 @@ library
     Figment.Internal.TomlScan
     Figment.Internal.ValueParser
   build-depends:
-      base        >= 4.20   && < 4.22
+      base        >= 4.20   && < 4.23
     , aeson       >= 2.2    && < 2.3
     , bytestring  >= 0.11   && < 0.13
     , conduit     >= 1.3    && < 1.4
