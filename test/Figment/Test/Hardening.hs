@@ -19,6 +19,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Figment
+import Figment.Error (addHints, configError)
 import qualified Figment.Jail as Jail
 import Figment.Path (fromSegments)
 import qualified Figment.Provider.Cli as Cli
@@ -295,6 +296,20 @@ jail =
         bracket_ (Blank.setEnv "FIGMENT_HARDENING_EMPTY" "" True) (Env.unsetEnv "FIGMENT_HARDENING_EMPTY") $ do
           Jail.withJail $ \j -> Jail.setEnv j "FIGMENT_HARDENING_EMPTY" "changed"
           Env.lookupEnv "FIGMENT_HARDENING_EMPTY" >>= (@?= Just "")
+    , testCase "S2: custom messages and hints cannot forge lines or hide characters" $ do
+        let e = addHints ["h\nforged\x202Ex"] (configError (Message "a\nb\x200Bc\xFEFFd"))
+            out = renderError e
+        assertBool (Text.unpack out) (not (Text.any (`elem` ['\x200B', '\x202E', '\xFEFF']) out))
+        length (Text.lines out) @?= 3
+    , testCase "R1: a TOML document with far too many tokens is rejected before parsing" $ do
+        let doc = Text.concat (replicate 200 "a = 1\n")
+        kinds (withLimits (limits 64 10) (from (fromText toml doc))) >>= (@?= [TooManyNodes 10])
+    , testCase "R1: dotted keys and commas count towards the pre-scan" $ do
+        let doc = "a = [" <> Text.replicate 200 "1," <> "1]\n"
+        kinds (withLimits (limits 64 10) (from (fromText toml doc))) >>= (@?= [TooManyNodes 10])
+    , testCase "C4: a byte-order mark before JSON is ignored" $ do
+        r <- load (from (fromText json "\xFEFF{\"a\":1}"))
+        either (const Nothing) (Just . (extractAt (keyPath "a") :: Loaded -> Either ConfigErrors Int)) r @?= Just (Right 1)
     , testCase "variables set inside a jail are gone after it" $ do
         Jail.withJail $ \j -> Jail.setEnv j "FIGMENT_HARDENING_TMP" "x"
         Env.lookupEnv "FIGMENT_HARDENING_TMP" >>= (@?= Nothing)

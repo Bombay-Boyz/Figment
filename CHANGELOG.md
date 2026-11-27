@@ -7,6 +7,15 @@ the `v0.2.0.0` tag. It is a major version under the PVP because the public
 `ErrorKind` type gained a constructor (`TooManyBytes`), which breaks
 exhaustive pattern matches in user code.
 
+### Hardening (source)
+
+- Error rendering now escapes control, bidirectional and zero-width characters
+  in every message, hint and type description, not just keys and file names.
+- A leading byte-order mark is ignored in JSON and TOML input.
+- TOML: the linear pre-scan also counts structural tokens and rejects a
+  document with more than `5 * maxNodes` of them as `TooManyNodes`, before
+  toml-parser builds its whole syntax tree.
+
 ### Added
 - `TooManyBytes` error kind and a per-source size limit: `maxBytes`,
   `withMaxBytes`, `defaultMaxBytes` (32 MiB by default). Files larger than

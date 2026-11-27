@@ -143,15 +143,15 @@ describeKind = \case
   DuplicateKey k -> "duplicate key " <> tick k
   KeyConflict a b -> tick a <> " conflicts with " <> tick b
     <> ": one sets a value where the other needs a dictionary"
-  InvalidType actual expected -> "invalid type: found " <> actual <> ", expected " <> expected
-  InvalidValue actual expected -> "invalid value: found " <> actual <> ", expected " <> expected
-  InvalidLength n expected -> "invalid length " <> tshow n <> ", expected " <> expected
+  InvalidType actual expected -> "invalid type: found " <> escapeControl actual <> ", expected " <> escapeControl expected
+  InvalidValue actual expected -> "invalid value: found " <> escapeControl actual <> ", expected " <> escapeControl expected
+  InvalidLength n expected -> "invalid length " <> tshow n <> ", expected " <> escapeControl expected
   MissingField f -> "missing field " <> tick f
   UnknownField f _ -> "unknown field " <> tick f
   UnknownVariant v valid -> "unknown variant " <> tick v <> ", expected one of "
     <> Text.intercalate ", " (map tick valid)
-  Message t -> t
-  InvalidArgument t -> "invalid argument: " <> t
+  Message t -> escapeControl t
+  InvalidArgument t -> "invalid argument: " <> escapeControl t
 
 -- | A multi-line, human-oriented rendering:
 --
@@ -163,7 +163,7 @@ renderError e =
   Text.intercalate "\n" $
     ("error: " <> describeKind (errorKind e))
       : location
-      ++ map ("  = hint: " <>) (suggestions ++ errorHints e)
+      ++ map (("  = hint: " <>) . escapeControl) (suggestions ++ errorHints e)
   where
     suggestions = case errorKind e of
       UnknownField _ (s : ss) -> ["did you mean " <> Text.intercalate " or " (map tick (s : ss)) <> "?"]

@@ -7,6 +7,8 @@
 -- @{@ outside strings and comments in O(n) time and O(1) space.
 module Figment.Internal.TomlScan
   ( bracketOverflow
+  , Overflow (..)
+  , scanOverflow
   ) where
 
 import Data.Text (Text)
@@ -28,55 +30,74 @@ data Mode
 -- like any other bracket while they are open, so callers should pass the
 -- depth limit plus two to avoid rejecting valid documents.
 bracketOverflow :: Int -> Text -> Maybe Pos
-bracketOverflow limit txt = go Normal 0 0 txt
+bracketOverflow limit txt = snd <$> scanOverflow limit maxBound txt
+
+-- | Why a document was rejected before parsing.
+data Overflow = TooDeep | TooBig
+  deriving stock (Eq, Show)
+
+-- | @scanOverflow depthLimit tokenLimit text@: like 'bracketOverflow', and
+-- also rejects a document with more than @tokenLimit@ structural characters
+-- (@=@, @,@, @[@, @{@, @.@) outside strings and comments. Every value in a
+-- TOML document needs at least one such character per five values it
+-- creates, so a limit of @5 * maxNodes@ never rejects a document that the
+-- node budget would accept, but stops a huge document before toml-parser
+-- builds its whole syntax tree.
+scanOverflow :: Int -> Int -> Text -> Maybe (Overflow, Pos)
+scanOverflow limit tokLimit txt = go Normal 0 0 0 txt
   where
-    go :: Mode -> Int -> Int -> Text -> Maybe Pos
-    go !mode !depth !off t = case Text.uncons t of
+    go :: Mode -> Int -> Int -> Int -> Text -> Maybe (Overflow, Pos)
+    go !mode !depth !toks !off t = case Text.uncons t of
       Nothing -> Nothing
       Just (c, rest) -> case mode of
         Normal -> case c of
-          '#' -> go Comment depth (off + 1) rest
+          '#' -> go Comment depth toks (off + 1) rest
           '"'
-            | "\"\"" `Text.isPrefixOf` rest -> go MultiBasic depth (off + 3) (Text.drop 2 rest)
-            | otherwise -> go Basic depth (off + 1) rest
+            | "\"\"" `Text.isPrefixOf` rest -> go MultiBasic depth toks (off + 3) (Text.drop 2 rest)
+            | otherwise -> go Basic depth toks (off + 1) rest
           '\''
-            | "''" `Text.isPrefixOf` rest -> go MultiLiteral depth (off + 3) (Text.drop 2 rest)
-            | otherwise -> go Literal depth (off + 1) rest
+            | "''" `Text.isPrefixOf` rest -> go MultiLiteral depth toks (off + 3) (Text.drop 2 rest)
+            | otherwise -> go Literal depth toks (off + 1) rest
           _
             | c == '[' || c == '{' ->
                 if depth + 1 > limit
-                  then Just (posAt off)
-                  else go Normal (depth + 1) (off + 1) rest
-            | c == ']' || c == '}' -> go Normal (max 0 (depth - 1)) (off + 1) rest
-            | otherwise -> go Normal depth (off + 1) rest
+                  then Just (TooDeep, posAt off)
+                  else tok (depth + 1)
+            | c == ']' || c == '}' -> go Normal (max 0 (depth - 1)) toks (off + 1) rest
+            | c == '=' || c == ',' || c == '.' -> tok depth
+            | otherwise -> go Normal depth toks (off + 1) rest
+            where
+              tok d'
+                | toks + 1 > tokLimit = Just (TooBig, posAt off)
+                | otherwise = go Normal d' (toks + 1) (off + 1) rest
         Comment
-          | c == '\n' -> go Normal depth (off + 1) rest
-          | otherwise -> go Comment depth (off + 1) rest
+          | c == '\n' -> go Normal depth toks (off + 1) rest
+          | otherwise -> go Comment depth toks (off + 1) rest
         Basic -> case c of
-          '\\' -> go Basic depth (off + 1 + skipped rest) (Text.drop 1 rest)
-          '"' -> go Normal depth (off + 1) rest
-          '\n' -> go Normal depth (off + 1) rest -- unterminated: the real parser reports it
-          _ -> go Basic depth (off + 1) rest
+          '\\' -> go Basic depth toks (off + 1 + skipped rest) (Text.drop 1 rest)
+          '"' -> go Normal depth toks (off + 1) rest
+          '\n' -> go Normal depth toks (off + 1) rest -- unterminated: the real parser reports it
+          _ -> go Basic depth toks (off + 1) rest
         Literal -> case c of
-          '\'' -> go Normal depth (off + 1) rest
-          '\n' -> go Normal depth (off + 1) rest
-          _ -> go Literal depth (off + 1) rest
+          '\'' -> go Normal depth toks (off + 1) rest
+          '\n' -> go Normal depth toks (off + 1) rest
+          _ -> go Literal depth toks (off + 1) rest
         MultiBasic -> case c of
-          '\\' -> go MultiBasic depth (off + 1 + skipped rest) (Text.drop 1 rest)
+          '\\' -> go MultiBasic depth toks (off + 1 + skipped rest) (Text.drop 1 rest)
           '"'
             | "\"\"" `Text.isPrefixOf` rest ->
                 -- the closing delimiter may be preceded by up to two content quotes
                 let after = Text.drop 2 rest
                     k = Text.length (Text.takeWhile (== '"') (Text.take 2 after))
-                 in go Normal depth (off + 3 + k) (Text.drop k after)
-          _ -> go MultiBasic depth (off + 1) rest
+                 in go Normal depth toks (off + 3 + k) (Text.drop k after)
+          _ -> go MultiBasic depth toks (off + 1) rest
         MultiLiteral -> case c of
           '\''
             | "''" `Text.isPrefixOf` rest ->
                 let after = Text.drop 2 rest
                     k = Text.length (Text.takeWhile (== '\'') (Text.take 2 after))
-                 in go Normal depth (off + 3 + k) (Text.drop k after)
-          _ -> go MultiLiteral depth (off + 1) rest
+                 in go Normal depth toks (off + 3 + k) (Text.drop k after)
+          _ -> go MultiLiteral depth toks (off + 1) rest
 
     -- an escape consumes the next character too (if there is one)
     skipped r = if Text.null r then 0 else 1
