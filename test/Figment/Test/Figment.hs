@@ -5,6 +5,7 @@ import Control.Exception (ErrorCall (..), throwIO)
 import Data.Function ((&))
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import System.FilePath (normalise)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
 import GHC.Stack (SrcLoc (..))
@@ -76,7 +77,7 @@ tests =
     , testCase "metadata records where the provider was added" $ do
         l <- loadOk (from (fromText json "{\"name\":\"x\",\"port\":1}"))
         case loadedSources l of
-          [m] -> fmap srcLocFile (metaAddedAt m) @?= Just "test/Figment/Test/Figment.hs"
+          [m] -> fmap (normalise . srcLocFile) (metaAddedAt m) @?= Just (normalise "test/Figment/Test/Figment.hs")
           other -> assertFailure (show other)
     , testCase "findValue / contains / findMetadata / extractAt / focus" $ do
         l <- loadOk (from (fromText json "{\"db\":{\"host\":\"h\",\"port\":5}}"))

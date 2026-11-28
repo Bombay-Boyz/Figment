@@ -3,6 +3,7 @@
 module Figment.Test.Errors (tests) where
 
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Lazy.Char8 as BLC
 import Data.Function ((&))
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -10,7 +11,7 @@ import qualified Data.Text.Encoding as TE
 import GHC.Generics (Generic)
 import Data.Word (Word16)
 import Test.Tasty
-import Test.Tasty.Golden (goldenVsString)
+import Test.Tasty.Golden.Advanced (goldenTest)
 
 import Figment
 import qualified Figment.Provider.Env as Env
@@ -39,7 +40,15 @@ report f = do
       Right v -> Text.pack ("unexpected success: " ++ show v)
 
 golden :: String -> IO Text -> TestTree
-golden n act = goldenVsString n ("test/golden/" ++ n ++ ".txt") (BL.fromStrict . TE.encodeUtf8 . (<> "\n") <$> act)
+golden n act = goldenTest n (BL.readFile path) (BL.fromStrict . TE.encodeUtf8 . (<> "\n") <$> act) cmp (BL.writeFile path)
+  where
+    path = "test/golden/" ++ n ++ ".txt"
+    -- compare ignoring carriage returns, so a Windows checkout that
+    -- converted the golden file to CRLF still matches
+    norm = BL.filter (/= 13)
+    cmp expected actual
+      | norm expected == norm actual = pure Nothing
+      | otherwise = pure (Just ("actual output:\n" ++ BLC.unpack actual))
 
 tests :: TestTree
 tests =

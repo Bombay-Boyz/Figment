@@ -38,7 +38,7 @@ import qualified Data.Text.Encoding as TE
 import System.Directory (createDirectoryIfMissing, getCurrentDirectory, setCurrentDirectory)
 import qualified System.Environment as Env
 import qualified System.Environment.Blank as Blank
-import System.FilePath (isAbsolute, splitDirectories, takeDirectory, (</>))
+import System.FilePath (isAbsolute, splitDirectories, takeDirectory, takeDrive, (</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -101,8 +101,11 @@ inside j rel = do
   live j
   let parts = splitDirectories rel
       root = splitDirectories (jailDirectory j)
+      -- A path with a root or drive part (@/x@, @\\x@, @C:x@, @C:\\x@) would
+      -- make '</>' discard the jail directory. On Windows @/x@ is not
+      -- 'isAbsolute', so test for any root, not only for absolute paths.
       contained
-        | isAbsolute rel = root `isPrefixOf` parts
+        | not (null (takeDrive rel)) = isAbsolute rel && root `isPrefixOf` parts
         | otherwise = True
   unless (contained && ".." `notElem` parts) $
     throwIO (userError ("Figment.Jail: path escapes the jail: " ++ rel))

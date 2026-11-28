@@ -10,6 +10,7 @@ import qualified Data.Aeson as Aeson
 import Data.Function ((&))
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import System.FilePath ((</>))
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
 import Test.Tasty
@@ -209,7 +210,7 @@ tests =
         l <- ok (F.from (F.fileExact F.toml path))
         case F.extract l of
           Right (Paths d t) -> do
-            F.relative d @?= Jail.jailDirectory j <> "/conf/data"
+            F.relative d @?= (Jail.jailDirectory j </> "conf" </> "data")
             fmap F.metaName (F.taggedMetadata t) @?= Just "TOML file"
           Left e -> assertFailure (Text.unpack (F.renderErrors e))
     , testCase "§10 partial" $ do

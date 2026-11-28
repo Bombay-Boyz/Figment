@@ -16,6 +16,11 @@ exhaustive pattern matches in user code.
   document with more than `5 * maxNodes` of them as `TooManyNodes`, before
   toml-parser builds its whole syntax tree.
 
+### Fixed (Windows)
+
+- `Figment.Jail`: a rooted path such as `/x` (not "absolute" on Windows, but
+  one that makes `</>` discard the jail directory) is now refused.
+
 ### Added
 - `Secret a`: a wrapper whose decode errors never quote the value and whose
   `Show` prints `Secret <redacted>`. Use it for passwords and tokens.
