@@ -20,7 +20,7 @@ import qualified Toml.Syntax as T
 import Figment.Error
 import Figment.Internal.Budget
 import Figment.Internal.Text (stripBom)
-import Figment.Internal.TomlScan (Overflow (..), scanOverflow)
+import Figment.Internal.TomlScan (Overflow (..), scanOverflow, tokenBudget)
 import Figment.Limits
 import Figment.Metadata (Pos (..))
 import Figment.Path
@@ -43,7 +43,7 @@ parseToml lim bs = do
   -- linear pass, before the parser is asked to build it. Table headers
   -- count as brackets while open, hence the allowance of two.
   let depthCap = if maxDepth lim >= maxBound - 2 then maxBound else maxDepth lim + 2
-      tokCap = if maxNodes lim >= maxBound `div` 5 then maxBound else 5 * maxNodes lim
+      tokCap = tokenBudget (maxNodes lim)
   case scanOverflow depthCap tokCap txt of
     Just (TooDeep, at) -> Left (withPos (Just at) (configError (DepthExceeded (maxDepth lim))))
     Just (TooBig, at) -> Left (withPos (Just at) (configError (TooManyNodes (maxNodes lim))))

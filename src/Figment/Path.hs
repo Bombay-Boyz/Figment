@@ -133,7 +133,7 @@ parsePath t0
         (seg, rest') <- keySeg rest
         more (seg : acc) rest'
       Just ('[', rest) -> do
-        let (ds, rest') = Text.span isDigit rest
+        let (ds, rest') = indexText rest
         case Text.uncons rest' of
           Just (']', rest'') | Just i <- parseIndex ds -> more (Index i : acc) rest''
           _ -> Left ("malformed index in path " <> quoted t0)
@@ -150,7 +150,7 @@ parsePath t0
 
     idxFirst t = case Text.uncons t of
       Just ('[', rest) ->
-        let (ds, rest') = Text.span isDigit rest
+        let (ds, rest') = indexText rest
         in case Text.uncons rest' of
              Just (']', rest'') | Just i <- parseIndex ds -> Right (Index i, rest'')
              _ -> Left ("malformed index in path " <> quoted t0)
@@ -175,16 +175,30 @@ parsePath t0
 
     quoted x = "`" <> x <> "`"
 
--- | A non-negative array index that fits an 'Int'. Longer digit strings are
--- rejected instead of silently wrapping around (as @read@ would).
+-- | The text of an index: an optional minus sign and ASCII digits. (A
+-- negative 'Index' can be built with '/#'; it never matches anything, but
+-- it renders as @[-1]@, so the parser accepts it to keep
+-- @parsePath . renderPath@ total.)
+indexText :: Text -> (Text, Text)
+indexText t = case Text.uncons t of
+  Just ('-', r) -> let (ds, rest) = Text.span isDigit r in (Text.cons '-' ds, rest)
+  _ -> Text.span isDigit t
+
+-- | An array index that fits an 'Int'. Longer digit strings are rejected
+-- instead of silently wrapping around (as @read@ would).
 parseIndex :: Text -> Maybe Int
-parseIndex ds
-  | Text.null ds = Nothing
-  | Text.compareLength ds 19 == GT = Nothing
-  | n > toInteger (maxBound :: Int) = Nothing
-  | otherwise = Just (fromInteger n)
+parseIndex t = case Text.uncons t of
+  Just ('-', ds) -> fmap negate' (digits ds)
+  _ -> digits t
   where
-    n = Text.foldl' (\acc c -> acc * 10 + toInteger (digitToInt c)) 0 ds
+    negate' n = -n
+    digits ds
+      | Text.null ds = Nothing
+      | Text.compareLength ds 19 == GT = Nothing
+      | n > toInteger (maxBound :: Int) = Nothing
+      | otherwise = Just (fromInteger n)
+      where
+        n = Text.foldl' (\acc c -> acc * 10 + toInteger (digitToInt c)) 0 ds
 
 -- | The @{hex}@ part of a @\\u{hex}@ escape: one to six hex digits naming a
 -- Unicode scalar value.

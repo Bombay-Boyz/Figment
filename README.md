@@ -193,7 +193,7 @@ own layering.
 
 ## Safety
 
-* **Limits** (`F.defaultLimits`: depth 64, one million values, 32 MiB per
+* **Limits** (`F.defaultLimits`: depth 64, 100 000 values, 8 MiB per
   source; override with `F.withLimits` and `F.withMaxBytes`) are enforced
   inside the JSON and YAML parsers and on structured environment and
   command-line values, so a hostile `[[[[...` megabyte is rejected at
@@ -214,6 +214,26 @@ own layering.
   `IoError` (asynchronous exceptions are re-thrown, as they must be).
 * `ConfigErrors` is an `Exception` whose `displayException` is the
   rendered report.
+
+## Reloading and explaining configuration
+
+`Figment.Runtime` keeps the last good configuration while a program runs.
+`reload` re-reads every provider; if the new data is invalid the old value
+stays in force and the errors are returned. Figment does not watch files:
+call `reload` on a signal, timer or file-system event.
+
+```haskell
+import Figment.Runtime
+
+rt <- startRuntime (F.from (F.file F.toml "App.toml") <> F.from (F.prefixed "APP_")) F.extract
+cfg <- snapshotValue <$> snapshot rt      -- never blocks
+_   <- reload rt                          -- Left errs: old config kept
+s1  <- awaitChange rt 1                   -- blocks until the version exceeds 1
+```
+
+`Figment.Report.renderSources` answers "where did this setting come from?"
+for every key (provider, native name such as `APP_DB__PORT`, file and
+position) without ever printing a value, so it is safe in logs.
 
 ## Testing your configuration
 

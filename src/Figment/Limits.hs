@@ -57,10 +57,16 @@ invalid :: Text.Text -> Int -> ConfigError
 invalid name v =
   configError (InvalidArgument (name <> " must be positive, got " <> Text.pack (show v)))
 
--- | Depth 64, one million values, 32 MiB per source (ADR 001, ADR 017).
+-- | Depth 64, 100 000 values, 8 MiB per source (ADR 001, ADR 017). A
+-- hand-written configuration has hundreds of values; these limits leave
+-- two orders of magnitude of headroom. They are low enough that the
+-- worst document the TOML parser can be handed (it builds the whole tree
+-- before figment sees a value, roughly a kilobyte per value) stays well
+-- under a gigabyte. Raise them with 'mkLimits' and 'withMaxBytes' if you
+-- load data files rather than configuration.
 defaultLimits :: Limits
-defaultLimits = Limits 64 1000000 defaultMaxBytes
+defaultLimits = Limits 64 100000 defaultMaxBytes
 
--- | 32 MiB: far above any hand-written configuration file.
+-- | 8 MiB: far above any hand-written configuration file.
 defaultMaxBytes :: Int
-defaultMaxBytes = 32 * 1024 * 1024
+defaultMaxBytes = 8 * 1024 * 1024

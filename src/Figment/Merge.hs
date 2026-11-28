@@ -52,7 +52,7 @@ coalesce o a@(Value ta na) b@(Value tb nb) = case (na, nb) of
   (Dict da, Dict db) ->
     Value (if leftWins o then ta else tb) (Dict (coalesceDict o da db))
   (Array xa, Array xb)
-    | concatenates o -> Value ta (Array (xa <> xb))
+    | concatenates o -> Value (if leftWins o then ta else tb) (Array (xa <> xb))
   _ -> if leftWins o then a else b
 
 -- | Combine two dictionaries key by key.

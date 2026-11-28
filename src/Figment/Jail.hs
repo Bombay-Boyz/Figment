@@ -35,7 +35,7 @@ import Data.List (isPrefixOf)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text.Encoding as TE
-import System.Directory (createDirectoryIfMissing, getCurrentDirectory, setCurrentDirectory)
+import System.Directory (canonicalizePath, createDirectoryIfMissing, getCurrentDirectory, setCurrentDirectory)
 import qualified System.Environment as Env
 import qualified System.Environment.Blank as Blank
 import System.FilePath (splitDirectories, takeDirectory, (</>))
@@ -93,9 +93,14 @@ live j = do
   unless ok $ throwIO (userError "Figment.Jail: the Jail handle was used after its withJail returned")
 
 -- | The path inside the jail, refusing anything that would leave it: a
--- relative path may not climb out with @..@, and an absolute path must
+-- relative path may not climb out with @..@, an absolute path must
 -- already be inside the jail directory (as the paths returned by
--- 'createFile' and 'createDirectory' are).
+-- 'createFile' and 'createDirectory' are), and the path may not reach
+-- outside through a symbolic link that already exists inside the jail.
+--
+-- The link check resolves the path when it is called, so it is a guard
+-- against mistakes in tests, not a sandbox against another process that
+-- swaps a link in between the check and the use.
 inside :: Jail -> FilePath -> IO FilePath
 inside j rel = do
   live j
@@ -110,6 +115,13 @@ inside j rel = do
       contained = root `isPrefixOf` splitDirectories target
   unless (contained && ".." `notElem` parts) $
     throwIO (userError ("Figment.Jail: path escapes the jail: " ++ rel))
+  -- Resolve existing symbolic links on both sides, so a link inside the
+  -- jail that points outside is refused (and a jail under a symlinked
+  -- temporary directory, such as macOS /var, still works).
+  realRoot <- canonicalizePath (jailDirectory j)
+  realTarget <- canonicalizePath target
+  unless (splitDirectories realRoot `isPrefixOf` splitDirectories realTarget) $
+    throwIO (userError ("Figment.Jail: path leaves the jail through a symbolic link: " ++ rel))
   pure target
 
 -- | Write a UTF-8 file, relative to the jail directory.
