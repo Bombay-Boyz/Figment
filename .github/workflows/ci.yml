@@ -87,7 +87,8 @@ jobs:
           mkdir "$RUNNER_TEMP/unpack"
           tar -xzf dist-sdist/figment-*.tar.gz -C "$RUNNER_TEMP/unpack"
           cd "$RUNNER_TEMP"/unpack/figment-*
-          cabal build --enable-tests
-          cabal test --test-show-details=direct
+          # --enable-tests on the test command too: without it cabal re-solves
+          # the plan with tests off and reports the suite as unavailable.
+          cabal test --enable-tests --test-show-details=direct
       - name: Haddock
         run: cabal haddock --haddock-all --enable-tests
