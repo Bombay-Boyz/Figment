@@ -9,6 +9,7 @@ module Figment.Internal.TomlScan
   ( bracketOverflow
   , Overflow (..)
   , scanOverflow
+  , tokenBudget
   ) where
 
 import Data.Text (Text)
@@ -23,6 +24,16 @@ data Mode
   | Literal -- ^ @'…'@
   | MultiBasic -- ^ @"""…"""@
   | MultiLiteral -- ^ @'''…'''@
+
+-- | The most structural characters (see 'scanOverflow') a source may hold
+-- when it may hold @n@ values. A value costs at most about two of them
+-- (a float in an array needs a comma and a point), so three per value never
+-- rejects a document the node budget would accept, while stopping one whose
+-- parse would need far more memory than that budget allows.
+tokenBudget :: Int -> Int
+tokenBudget n
+  | n >= maxBound `div` 3 = maxBound
+  | otherwise = 3 * n
 
 -- | @bracketOverflow limit text@ is the position of the first @[@ or @{@
 -- that raises the bracket nesting above @limit@, if any. Brackets inside
@@ -39,8 +50,8 @@ data Overflow = TooDeep | TooBig
 -- | @scanOverflow depthLimit tokenLimit text@: like 'bracketOverflow', and
 -- also rejects a document with more than @tokenLimit@ structural characters
 -- (@=@, @,@, @[@, @{@, @.@) outside strings and comments. Every value in a
--- TOML document needs at least one such character per five values it
--- creates, so a limit of @5 * maxNodes@ never rejects a document that the
+-- TOML document needs at least one such character per value it
+-- creates, so a limit of 'tokenBudget' never rejects a document that the
 -- node budget would accept, but stops a huge document before toml-parser
 -- builds its whole syntax tree.
 scanOverflow :: Int -> Int -> Text -> Maybe (Overflow, Pos)

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.1.0
+
+Driven by an independent audit of 0.3.0.0 and by measuring the TOML parser.
+New modules make this a minor version under the PVP.
+
+### Added
+- `Figment.Runtime`: reloadable configuration. `startRuntime`, `snapshot`,
+  `reload`, `lastReloadError`, `awaitChange`. A failed reload keeps the last
+  good configuration; the version only advances when the data changed.
+- `Figment.Report`: `sources` and `renderSources` list every key with its
+  provider, native name (such as `APP_DB__PORT`), file and position, and
+  never a value, so the output is safe to log.
+
+### Fixed
+- Merging two arrays with `Adjoin` or `Admerge` now keeps the container's
+  provenance according to the merge order, as dictionaries do.
+- Structured environment and command-line values are rejected by a linear
+  token pre-scan against `maxNodes` before they are built.
+- `parsePath (renderPath p)` round-trips paths containing negative indexes.
+- `Figment.Jail` refuses a path that leaves the jail through a symbolic link.
+
+### Changed (behaviour)
+- Default limits are lower: `maxNodes` 100 000 (was 1 000 000) and
+  `maxBytes` 8 MiB (was 32 MiB). Measured with toml-parser 2.0.2.0, a TOML
+  document costs about 900 bytes per key, so the old defaults let a single
+  32 MiB file reach gigabytes of memory. Raise them with `withLimits` and
+  `withMaxBytes` if you really load larger files.
+- The TOML structural-token budget is `3 * maxNodes` (was `5 *`).
+  Worst-case documents that pass the guard now peak at about 260 MiB of
+  heap (measured), against 2.2 to 2.5 GiB before.
+
 ## 0.3.0.0 — 2026-11-28
 
 Hardening release. It follows 0.2.0.0 and contains everything merged after

@@ -5,6 +5,7 @@ import System.FilePath ((</>))
 import Test.Tasty
 
 import qualified Figment.Test.Adversarial as Adversarial
+import qualified Figment.Test.AuditFixes as AuditFixes
 import qualified Figment.Test.Cli as Cli
 import qualified Figment.Test.Decode as Decode
 import qualified Figment.Test.Env as Env
@@ -34,6 +35,7 @@ main = do
       , Errors.tests goldenDir
       , Adversarial.tests
       , Hardening.tests
+      , AuditFixes.tests
       , Readme.tests
       , Tutorial.tests
       ]

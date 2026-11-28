@@ -464,7 +464,7 @@ module Figment.Tutorial
 -- $limits
 --
 -- Every bundled parser enforces t'Figment.Limits' /while/ parsing:
--- nesting depth (64 by default) and the number of values (one million).
+-- nesting depth (64 by default) and the number of values (100 000).
 -- A megabyte of @[[[[@ is rejected at depth 65 without being built.
 -- YAML aliases count at their expanded size, which defeats \"billion
 -- laughs\" documents. Change the limits with 'Figment.withLimits' and

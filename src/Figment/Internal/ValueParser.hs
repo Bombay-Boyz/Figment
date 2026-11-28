@@ -20,6 +20,7 @@ module Figment.Internal.ValueParser
   ) where
 
 import Data.Char (isDigit, isHexDigit, isSpace)
+import Data.Maybe (isJust)
 import qualified Data.Map.Strict as Map
 import Data.Scientific (scientific)
 import Data.Text (Text)
@@ -28,6 +29,7 @@ import qualified Data.Vector as Vector
 
 import Figment.Error
 import Figment.Internal.Number (integerFromDigits)
+import Figment.Internal.TomlScan (scanOverflow, tokenBudget)
 import Figment.Limits
 import Figment.Value
 
@@ -50,7 +52,10 @@ parseValue lim raw
       Nothing -> Right (String raw)
       Just (c, _)
         | c == '[' || c == '{' || c == '"' || c == '\'' ->
-            case structured lim 1 trimmed of
+          -- reject an enormous value before building any of it
+          if isJust (scanOverflow maxBound (tokenBudget (maxNodes lim)) trimmed)
+            then Left (Limit (configError (TooManyNodes (maxNodes lim))))
+            else case structured lim 1 trimmed of
               Right (v, rest) | Text.null (Text.strip rest) -> Right (valueNode v)
               Right _ -> Left NoParse
               Left e -> Left e

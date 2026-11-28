@@ -79,9 +79,9 @@ sizeLimits :: TestTree
 sizeLimits =
   testGroup
     "size limit"
-    [ testCase "the default is 32 MiB and is visible" $ do
+    [ testCase "the default is 8 MiB and is visible" $ do
         maxBytes defaultLimits @?= defaultMaxBytes
-        defaultMaxBytes @?= 32 * 1024 * 1024
+        defaultMaxBytes @?= 8 * 1024 * 1024
     , testCase "withMaxBytes validates" $ do
         isLeft (withMaxBytes 0 defaultLimits) @? "zero is rejected"
         isLeft (withMaxBytes (-1) defaultLimits) @? "negative is rejected"
