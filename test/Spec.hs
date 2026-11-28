@@ -1,5 +1,7 @@
 module Main (main) where
 
+import System.Directory (getCurrentDirectory)
+import System.FilePath ((</>))
 import Test.Tasty
 
 import qualified Figment.Test.Adversarial as Adversarial
@@ -16,7 +18,9 @@ import qualified Figment.Test.Readme as Readme
 import qualified Figment.Test.Tutorial as Tutorial
 
 main :: IO ()
-main =
+main = do
+  -- resolved before any test runs: Jail changes the working directory
+  goldenDir <- (</> ("test" </> "golden")) <$> getCurrentDirectory
   defaultMain $
     testGroup
       "figment"
@@ -27,7 +31,7 @@ main =
       , Providers.tests
       , Env.tests
       , Cli.tests
-      , Errors.tests
+      , Errors.tests goldenDir
       , Adversarial.tests
       , Hardening.tests
       , Readme.tests

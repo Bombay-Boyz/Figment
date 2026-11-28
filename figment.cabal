@@ -133,6 +133,7 @@ test-suite figment-test
     , bytestring
     , containers
     , deepseq
+    , directory
     , filepath
     , tasty        >= 1.4  && < 1.6
     , tasty-golden >= 2.3  && < 2.4

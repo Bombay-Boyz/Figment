@@ -10,6 +10,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.Encoding as TE
 import GHC.Generics (Generic)
 import Data.Word (Word16)
+import System.FilePath ((</>))
 import Test.Tasty
 import Test.Tasty.Golden.Advanced (goldenTest)
 
@@ -39,10 +40,14 @@ report f = do
       Left es -> renderErrors es
       Right v -> Text.pack ("unexpected success: " ++ show v)
 
-golden :: String -> IO Text -> TestTree
-golden n act = goldenTest n (BL.readFile path) (BL.fromStrict . TE.encodeUtf8 . (<> "\n") <$> act) cmp (BL.writeFile path)
+-- | @golden dir name action@: the golden files live in @dir@, which must be
+-- absolute. 'Jail' changes the process working directory while a jail test
+-- runs and the suite runs its tests in parallel, so a relative path would be
+-- looked up in the wrong directory whenever the two overlap.
+golden :: FilePath -> String -> IO Text -> TestTree
+golden dir n act = goldenTest n (BL.readFile path) (BL.fromStrict . TE.encodeUtf8 . (<> "\n") <$> act) cmp (BL.writeFile path)
   where
-    path = "test/golden/" ++ n ++ ".txt"
+    path = dir </> (n ++ ".txt")
     -- compare ignoring carriage returns, so a Windows checkout that
     -- converted the golden file to CRLF still matches
     norm = BL.filter (/= 13)
@@ -50,27 +55,28 @@ golden n act = goldenTest n (BL.readFile path) (BL.fromStrict . TE.encodeUtf8 . 
       | norm expected == norm actual = pure Nothing
       | otherwise = pure (Just ("actual output:\n" ++ BLC.unpack actual))
 
-tests :: TestTree
-tests =
+-- | The argument is the absolute path of the @test/golden@ directory.
+tests :: FilePath -> TestTree
+tests dir =
   testGroup
     "errors (golden)"
-    [ golden "decode-many" $
+    [ golden dir "decode-many" $
         report $
           new
             & merge (fromText toml "[db]\nhost = \"h\"\nport = 70000\nhots = 1\n")
             & merge (Env.fromList [("APP_LEVEL", "verbose")] (prefixed "APP_"))
-    , golden "missing" $
+    , golden dir "missing" $
         report $
           new
             & merge (fromText json "{\"db\":{\"host\":\"h\",\"port\":1},\"level\":\"Info\"}")
             & merge (Env.fromList [] (prefixed "APP_") & Env.split "__")
             & merge (cli [])
-    , golden "load-failures" $
+    , golden dir "load-failures" $
         report $
           new
             & merge (fromText yaml "a: 1\na: 2\n")
             & merge (fromText toml "x = \n")
             & merge (Env.fromList [("APP_DB", "1"), ("APP_DB__HOST", "2")] (prefixed "APP_" & Env.split "__"))
-    , golden "single" $
+    , golden dir "single" $
         report (new & merge (fromText json "{\"name\":\"n\",\"db\":{\"host\":\"h\",\"port\":\"x\"},\"level\":\"Debug\"}"))
     ]
