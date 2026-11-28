@@ -1,0 +1,6 @@
+# Golden files are compared byte for byte on some platforms; keep LF.
+test/golden/* text eol=lf
+*.hs text eol=lf
+*.md text eol=lf
+*.cabal text eol=lf
+*.yml text eol=lf

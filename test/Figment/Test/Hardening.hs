@@ -11,6 +11,7 @@ import Control.Exception (bracket_, evaluate, try)
 import Data.Either (isLeft)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import System.Info (os)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
 import qualified System.Environment as Env
@@ -293,7 +294,8 @@ jail =
           _ <- Jail.createFile j "sub/inside.txt" "x"
           pure ()
     , testCase "an environment variable that was empty before the jail is empty after it" $
-        bracket_ (Blank.setEnv "FIGMENT_HARDENING_EMPTY" "" True) (Env.unsetEnv "FIGMENT_HARDENING_EMPTY") $ do
+        -- Windows cannot hold an empty variable: setting one removes it.
+        if os == "mingw32" then pure () else bracket_ (Blank.setEnv "FIGMENT_HARDENING_EMPTY" "" True) (Env.unsetEnv "FIGMENT_HARDENING_EMPTY") $ do
           Jail.withJail $ \j -> Jail.setEnv j "FIGMENT_HARDENING_EMPTY" "changed"
           Env.lookupEnv "FIGMENT_HARDENING_EMPTY" >>= (@?= Just "")
     , testCase "S2: custom messages and hints cannot forge lines or hide characters" $ do

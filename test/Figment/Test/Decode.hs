@@ -11,6 +11,7 @@ import Data.Int (Int8)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
+import System.FilePath (normalise, takeDirectory, (</>))
 import qualified Data.Text as Text
 import Data.Time (Day, fromGregorian)
 import Data.Word (Word16)
@@ -153,8 +154,8 @@ tests =
           Right (WithTagged s d) -> do
             taggedValue s @?= "x"
             taggedPath s @?= keyPath "secret"
-            fmap metaSource (taggedMetadata s) @?= Just (Just (FileSource path))
-            relative d @?= dirOf path <> "/data"
+            fmap metaSource (taggedMetadata s) @?= Just (Just (FileSource (normalise path)))
+            relative d @?= takeDirectory (normalise path) </> "data"
           Left e -> assertFailure (Text.unpack (renderErrors e))
     , testCase "ISO dates, NonEmpty, tuples" $ do
         r <- decodeJ "{\"d\":\"2024-02-29\"}"
@@ -177,7 +178,6 @@ tests =
           Right v -> assertFailure (show v)
     ]
   where
-    dirOf = reverse . drop 1 . dropWhile (/= '/') . reverse
 
 withTmpToml :: (FilePath -> IO a) -> IO a
 withTmpToml k = Jail.withJail $ \j ->

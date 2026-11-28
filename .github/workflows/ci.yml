@@ -82,7 +82,13 @@ jobs:
       - name: sdist builds from the tarball alone
         run: |
           cabal sdist --output-dir dist-sdist
-          mkdir unpack && tar -xzf dist-sdist/figment-*.tar.gz -C unpack
-          cd unpack/figment-* && cabal build --enable-tests && cabal test
+          # Unpack outside the workspace: inside it, cabal would find the
+          # repository's cabal.project and not treat the tarball as a package.
+          mkdir "$RUNNER_TEMP/unpack"
+          tar -xzf dist-sdist/figment-*.tar.gz -C "$RUNNER_TEMP/unpack"
+          cd "$RUNNER_TEMP"/unpack/figment-*
+          # --enable-tests on the test command too: without it cabal re-solves
+          # the plan with tests off and reports the suite as unavailable.
+          cabal test --enable-tests --test-show-details=direct
       - name: Haddock
         run: cabal haddock --haddock-all --enable-tests
