@@ -38,7 +38,7 @@ import qualified Data.Text.Encoding as TE
 import System.Directory (createDirectoryIfMissing, getCurrentDirectory, setCurrentDirectory)
 import qualified System.Environment as Env
 import qualified System.Environment.Blank as Blank
-import System.FilePath (isAbsolute, splitDirectories, takeDirectory, takeDrive, (</>))
+import System.FilePath (splitDirectories, takeDirectory, (</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -99,17 +99,18 @@ live j = do
 inside :: Jail -> FilePath -> IO FilePath
 inside j rel = do
   live j
-  let parts = splitDirectories rel
+  let target = jailDirectory j </> rel
+      parts = splitDirectories rel
       root = splitDirectories (jailDirectory j)
-      -- A path with a root or drive part (@/x@, @\\x@, @C:x@, @C:\\x@) would
-      -- make '</>' discard the jail directory. On Windows @/x@ is not
-      -- 'isAbsolute', so test for any root, not only for absolute paths.
-      contained
-        | not (null (takeDrive rel)) = isAbsolute rel && root `isPrefixOf` parts
-        | otherwise = True
+      -- Judge the path that will actually be used, not the one that was
+      -- asked for. '</>' discards the jail directory when @rel@ is rooted
+      -- (@/x@, @\\x@, @C:\\x@, @C:x@), and what counts as rooted differs
+      -- between platforms: on Windows @/x@ is neither 'isAbsolute' nor does
+      -- it have a drive, yet '</>' still treats it as rooted.
+      contained = root `isPrefixOf` splitDirectories target
   unless (contained && ".." `notElem` parts) $
     throwIO (userError ("Figment.Jail: path escapes the jail: " ++ rel))
-  pure (jailDirectory j </> rel)
+  pure target
 
 -- | Write a UTF-8 file, relative to the jail directory.
 createFile :: Jail -> FilePath -> Text -> IO FilePath
