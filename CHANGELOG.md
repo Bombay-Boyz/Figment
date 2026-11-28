@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0.0 — unreleased
+## 0.3.0.0 — 2026-11-28
 
 Hardening release. It follows 0.2.0.0 and contains everything merged after
 the `v0.2.0.0` tag. It is a major version under the PVP because the public
